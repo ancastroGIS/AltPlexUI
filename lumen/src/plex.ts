@@ -103,7 +103,9 @@ export interface Item {
   type: string;
   title: string;
   grandparentTitle?: string;
+  grandparentRatingKey?: string;
   parentTitle?: string;
+  parentRatingKey?: string;
   parentIndex?: number;
   index?: number;
   year?: number;
@@ -113,6 +115,8 @@ export interface Item {
   viewOffset?: number;
   contentRating?: string;
   Genre?: { tag: string }[];
+  leafCount?: number;      // total episodes in a show/season
+  viewedLeafCount?: number; // watched episodes
 }
 export interface Hub {
   title: string;
@@ -145,6 +149,19 @@ export async function getSections(): Promise<Section[]> {
     title: d.title,
     type: d.type,
   }));
+}
+
+// All items in a library section (for full-library browsing).
+export async function getAllItems(sectionKey: string): Promise<Item[]> {
+  const mc = await api(`/library/sections/${sectionKey}/all`);
+  return (mc.Metadata || []) as Item[];
+}
+
+// Children of a container item: seasons of a show, episodes of a season,
+// albums of an artist, or tracks of an album.
+export async function getChildren(ratingKey: string): Promise<Item[]> {
+  const mc = await api(`/library/metadata/${ratingKey}/children`);
+  return (mc.Metadata || []) as Item[];
 }
 
 // Global home hubs, or a single library's hubs when sectionKey is given.

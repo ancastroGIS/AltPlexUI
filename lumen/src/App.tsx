@@ -1,5 +1,5 @@
 // src/App.tsx
-import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Match, Show, Suspense, Switch, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import {
   getIdentity, getSections, getHubs, getToken, setToken, clearToken,
   createPin, checkPin, plexAuthUrl, PlexError,
@@ -7,7 +7,7 @@ import {
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar, Player } from "./components";
+import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView } from "./components";
 import {
   status, setStatus,
   demo, setDemo,
@@ -16,16 +16,74 @@ import {
   activeSection,
 } from "./store";
 
+// ── Navigation layer types ─────────────────────────────────────────────────
+
+type PlayerLayer  = { kind: "player";  item: Item };
+type LibraryLayer = { kind: "library"; sectionKey: string; title: string; sectionType: string };
+type DetailLayer  = { kind: "detail";  item: Item };
+type NavLayer = PlayerLayer | LibraryLayer | DetailLayer;
+
+// ── App ────────────────────────────────────────────────────────────────────
+
 export function App() {
   const [sections, setSections] = createSignal<Section[]>([]);
-  const [playingItem, setPlayingItem] = createSignal<Item | null>(null);
+  const [navStack, setNavStack] = createSignal<NavLayer[]>([]);
   let stopPoll: (() => void) | undefined;
 
+  // Typed accessors for the top navigation layer
+  const topLayer    = () => { const s = navStack(); return s[s.length - 1] ?? null; };
+  const playerLayer = (): PlayerLayer  | null => { const l = topLayer(); return l?.kind === "player"  ? l : null; };
+  const libraryLayer= (): LibraryLayer | null => { const l = topLayer(); return l?.kind === "library" ? l : null; };
+  const detailLayer = (): DetailLayer  | null => { const l = topLayer(); return l?.kind === "detail"  ? l : null; };
+
   onMount(() => {
+    // Seed the history so the first back button pops our layers, not the browser tab
+    history.replaceState({ lumenDepth: 0 }, "");
+    window.addEventListener("popstate", handlePop);
+
     const cleanup = initSpatialNav();
-    onCleanup(cleanup);
+    onCleanup(() => {
+      window.removeEventListener("popstate", handlePop);
+      cleanup();
+    });
+
     if (getToken()) connect();
   });
+
+  function handlePop(e: PopStateEvent) {
+    const depth = (e.state as { lumenDepth?: number })?.lumenDepth ?? 0;
+    setNavStack((prev) => prev.slice(0, depth));
+  }
+
+  function pushLayer(layer: NavLayer) {
+    setNavStack((prev) => {
+      const next = [...prev, layer];
+      history.pushState({ lumenDepth: next.length }, "");
+      return next;
+    });
+  }
+
+  // X buttons and programmatic close call this — it goes back in history,
+  // which fires popstate, which calls setNavStack to pop the layer.
+  function goBack() {
+    history.back();
+  }
+
+  // Route an item click: container types open a detail view; media opens the player.
+  function handleItemClick(item: Item) {
+    const containers = ["show", "artist", "album", "season"];
+    if (containers.includes(item.type)) {
+      pushLayer({ kind: "detail", item });
+    } else {
+      pushLayer({ kind: "player", item });
+    }
+  }
+
+  function openLibrary(section: Section) {
+    pushLayer({ kind: "library", sectionKey: section.key, title: section.title, sectionType: section.type });
+  }
+
+  // ── Server connection ────────────────────────────────────────────────────
 
   async function connect() {
     setStatus("connecting");
@@ -103,21 +161,25 @@ export function App() {
     setServerName("");
     setErrorMsg("");
     setPinData(null);
-    setPlayingItem(null);
+    setNavStack([]);
     setDemo(false);
     setStatus("setup");
+    // Reset history depth so back button doesn't re-open closed layers
+    history.replaceState({ lumenDepth: 0 }, "");
   }
 
   function startDemo() {
     setDemo(true);
     setSections([
       { key: "d1", title: "Movies", type: "movie" },
-      { key: "d2", title: "Shows", type: "show" },
-      { key: "d3", title: "Music", type: "artist" },
+      { key: "d2", title: "Shows",  type: "show"  },
+      { key: "d3", title: "Music",  type: "artist" },
     ]);
     setServerName("");
     setStatus("ready");
   }
+
+  // ── Data loading ─────────────────────────────────────────────────────────
 
   const [home] = createResource(
     () => (status() === "ready" ? { demo: demo(), section: activeSection() } : null),
@@ -132,6 +194,8 @@ export function App() {
       return { hero, hubs };
     }
   );
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <Show
@@ -150,19 +214,22 @@ export function App() {
         />
       }
     >
+      {/* ── Base view (always mounted, overlays appear on top) ─────────── */}
       <div class="app">
-        <TopBar sections={sections()} onSignOut={handleSignOut} />
+        <TopBar sections={sections()} onSignOut={handleSignOut} onBrowseAll={openLibrary} />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           <Show when={home()} keyed>
             {(data) => (
               <main>
-                <Show when={data.hero}>{(h) => <Hero item={h()} />}</Show>
+                <Show when={data.hero}>
+                  {(h) => <Hero item={h()} onPlay={handleItemClick} />}
+                </Show>
                 <div class="rows">
                   <For each={data.hubs}>
-                    {(hub) => <Row hub={hub} onPlay={setPlayingItem} />}
+                    {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
                   </For>
                   <Show when={data.hubs.length === 0}>
-                    <p class="empty">Nothing here yet. Add media to this library and it'll show up.</p>
+                    <p class="empty">Nothing here yet.</p>
                   </Show>
                 </div>
               </main>
@@ -170,9 +237,38 @@ export function App() {
           </Show>
         </Suspense>
       </div>
-      <Show when={playingItem()}>
-        {(item) => <Player item={item()} onClose={() => setPlayingItem(null)} />}
-      </Show>
+
+      {/* ── Overlay layers (only the topmost renders) ─────────────────── */}
+      <Switch>
+        <Match when={libraryLayer()}>
+          {(l) => (
+            <LibraryGrid
+              sectionKey={l().sectionKey}
+              title={l().title}
+              sectionType={l().sectionType}
+              onClose={goBack}
+              onItemClick={handleItemClick}
+            />
+          )}
+        </Match>
+        <Match when={detailLayer()}>
+          {(l) => (
+            <DetailView
+              item={l().item}
+              onClose={goBack}
+              onItemClick={handleItemClick}
+            />
+          )}
+        </Match>
+        <Match when={playerLayer()}>
+          {(l) => (
+            <Player
+              item={l().item}
+              onClose={goBack}
+            />
+          )}
+        </Match>
+      </Switch>
     </Show>
   );
 }
