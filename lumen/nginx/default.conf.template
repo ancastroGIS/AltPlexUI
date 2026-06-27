@@ -1,10 +1,27 @@
 # nginx/default.conf.template
 # ${PLEX_SERVER_URL} is substituted at container start by the nginx image.
+#
+# HTTPS is handled by whatever reverse proxy sits in front of this container
+# (Nginx Proxy Manager, Traefik, Caddy, etc.). Point your proxy at port 7070
+# and terminate TLS there. The legs inside your LAN are plain HTTP, which is
+# standard and acceptable for self-hosted setups.
+#
+# Minimal proxy manager config:
+#   Forward hostname/IP : <docker-host>
+#   Forward port        : 7070
+#   Enable HTTPS / SSL  : yes (via your proxy manager's cert)
+#   Websockets          : not required
+
 server {
     listen 70;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
+
+    # Pass real client IP and protocol through from upstream reverse proxy.
+    # Most proxy managers set these automatically.
+    real_ip_header X-Forwarded-For;
+    set_real_ip_from 0.0.0.0/0;
 
     # Reverse-proxy all Plex API + media calls. The trailing slash on proxy_pass
     # strips the /plex/ prefix, so /plex/library/sections -> $SERVER/library/sections.
@@ -14,6 +31,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header Connection "";
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_buffering off;          # smooth streaming / transcode sessions
         proxy_read_timeout 3600s;     # long-lived media connections
     }
@@ -25,6 +43,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host plex.tv;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header Connection "";
     }
 
