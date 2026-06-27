@@ -3,7 +3,7 @@ import { For, Show, createResource, createSignal, createEffect, onMount, onClean
 import Hls from "hls.js";
 import {
   buildHlsUrl, newSessionId, stopTranscodeSession, reportProgress,
-  getAllItems, getChildren,
+  getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
 import { poster, backdrop, progress } from "./media";
@@ -613,6 +613,278 @@ export function Player(props: { item: Item; onClose: () => void }) {
           </div>
         </div>
       </Show>
+    </div>
+  );
+}
+
+// ── InfoView ───────────────────────────────────────────────────────────────
+// Top-level info page for a movie, show, artist, or album.
+// Pulls rich metadata (synopsis, cast, crew, file tech info) from the Plex
+// API and displays it while letting the user initiate playback or browsing.
+
+const VIDEO_CODEC: Record<string, string> = {
+  hevc: "H.265 (HEVC)", h264: "H.264 (AVC)", avc: "H.264 (AVC)",
+  vp9: "VP9", av1: "AV1", mpeg4: "MPEG-4", mpeg2video: "MPEG-2",
+};
+const AUDIO_CODEC: Record<string, string> = {
+  dca: "DTS", ac3: "Dolby Digital", eac3: "Dolby Digital+",
+  truehd: "Dolby TrueHD", aac: "AAC", flac: "FLAC", mp3: "MP3", opus: "Opus",
+};
+
+function codecLabel(codec: string | undefined, map: Record<string, string>): string {
+  if (!codec) return "—";
+  return map[codec.toLowerCase()] ?? codec.toUpperCase();
+}
+
+function runtime(ms: number | undefined): string {
+  if (!ms) return "";
+  const mins = Math.floor(ms / 60000);
+  return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+}
+
+function ratingDisplay(score: number | undefined, image: string | undefined): string | null {
+  if (score == null) return null;
+  // Plex stores RT scores as 0-10 representing 0-100%.
+  // IMDb scores are also 0-10 but represent the actual score.
+  if (image?.includes("rottentomatoes") || image?.includes("metacritic")) {
+    return `${(score * 10).toFixed(0)}%`;
+  }
+  // IMDb or unknown — show as decimal
+  return score.toFixed(1);
+}
+
+function ratingSource(image: string | undefined): string {
+  if (!image) return "★";
+  if (image.includes("rottentomatoes")) return "RT";
+  if (image.includes("imdb")) return "IMDb";
+  if (image.includes("metacritic")) return "MC";
+  return "★";
+}
+
+export function InfoView(props: {
+  item: Item;
+  onClose: () => void;
+  onPlay: (item: Item) => void;
+  onBrowseChildren: (item: Item) => void;
+}) {
+  const [details] = createResource(() => props.item.ratingKey, getDetails);
+
+  // Merge fetched details over the base item — base item renders immediately
+  // so there's no blank screen while loading.
+  const it = () => details() ?? props.item;
+
+  const isPlayable  = () => ["movie", "episode", "track"].includes(it().type);
+  const isContainer = () => ["show", "artist", "album"].includes(it().type);
+
+  const media = () => details()?.Media?.[0];
+
+  const criticsRating  = () => ratingDisplay(it().rating, it().ratingImage);
+  const audienceRating = () => ratingDisplay(it().audienceRating, it().audienceRatingImage);
+
+  const browseLabel = () => {
+    switch (it().type) {
+      case "show":   return "Browse Seasons";
+      case "artist": return "Browse Albums";
+      case "album":  return "Browse Tracks";
+      default:       return "Browse";
+    }
+  };
+
+  return (
+    <div class="info-view">
+      {/* ── Hero ─────────────────────────────────────────────────── */}
+      <div
+        class="info-hero"
+        style={{ "background-image": it().art ? `url("${backdrop(it())}")` : undefined }}
+      >
+        <div class="info-hero-scrim" />
+
+        <button
+          class="info-close"
+          onClick={(e) => { e.stopPropagation(); props.onClose(); }}
+        >
+          ✕
+        </button>
+
+        <div class="info-hero-content">
+          <Show when={it().thumb}>
+            <img
+              class="info-poster"
+              src={poster(it(), 220, 330)}
+              alt={it().title}
+            />
+          </Show>
+
+          <div class="info-meta">
+            <h1 class="info-title">{it().title}</h1>
+            <Show when={it().tagline}>
+              <p class="info-tagline">{it().tagline}</p>
+            </Show>
+
+            {/* Year · rating · runtime · studio */}
+            <div class="info-attr-row">
+              <Show when={it().year}><span class="info-attr">{it().year}</span><span class="info-attr-sep">·</span></Show>
+              <Show when={it().contentRating}><span class="info-attr info-attr-pill">{it().contentRating}</span><span class="info-attr-sep">·</span></Show>
+              <Show when={it().duration}><span class="info-attr">{runtime(it().duration)}</span></Show>
+              <Show when={it().leafCount}><span class="info-attr-sep">·</span><span class="info-attr">{it().leafCount} ep</span></Show>
+              <Show when={it().studio}><span class="info-attr-sep">·</span><span class="info-attr info-attr-dim">{it().studio}</span></Show>
+            </div>
+
+            {/* Ratings */}
+            <Show when={criticsRating() || audienceRating()}>
+              <div class="info-rating-row">
+                <Show when={criticsRating()}>
+                  <span class="info-rating-chip">
+                    <span class="info-rating-source">{ratingSource(it().ratingImage)}</span>
+                    {criticsRating()}
+                  </span>
+                </Show>
+                <Show when={audienceRating()}>
+                  <span class="info-rating-chip info-rating-audience">
+                    <span class="info-rating-source">Audience</span>
+                    {audienceRating()}
+                  </span>
+                </Show>
+              </div>
+            </Show>
+
+            {/* Genre tags */}
+            <Show when={(it().Genre ?? []).length > 0}>
+              <div class="info-genres">
+                <For each={it().Genre}>{(g) => <span class="info-genre-tag">{g.tag}</span>}</For>
+              </div>
+            </Show>
+
+            {/* Action buttons */}
+            <div class="info-actions">
+              <Show when={isPlayable()}>
+                <button
+                  class="btn btn-primary info-action-btn"
+                  onClick={(e) => { e.stopPropagation(); props.onPlay(it()); }}
+                >
+                  ▶ Play
+                </button>
+              </Show>
+              <Show when={isContainer()}>
+                <button
+                  class="btn btn-primary info-action-btn"
+                  onClick={(e) => { e.stopPropagation(); props.onBrowseChildren(it()); }}
+                >
+                  {browseLabel()}
+                </button>
+              </Show>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Body (scrollable) ────────────────────────────────────── */}
+      <div class="info-body">
+        <Show when={details.loading && !props.item.summary}>
+          <div class="overlay-loading"><div class="pin-spinner" /></div>
+        </Show>
+
+        {/* Overview */}
+        <Show when={it().summary}>
+          <section class="info-section">
+            <h2 class="info-section-label">Overview</h2>
+            <p class="info-summary">{it().summary}</p>
+          </section>
+        </Show>
+
+        {/* Cast */}
+        <Show when={(details()?.Role ?? []).length > 0}>
+          <section class="info-section">
+            <h2 class="info-section-label">Cast</h2>
+            <div class="info-cast">
+              <For each={details()!.Role!.slice(0, 14)}>
+                {(member) => (
+                  <div class="info-cast-card">
+                    <Show
+                      when={member.thumb}
+                      fallback={<div class="info-cast-avatar info-cast-placeholder">{member.tag[0]}</div>}
+                    >
+                      {(t) => (
+                        <img
+                          class="info-cast-avatar"
+                          src={img(t(), 88, 88)}
+                          alt={member.tag}
+                          loading="lazy"
+                        />
+                      )}
+                    </Show>
+                    <span class="info-cast-name">{member.tag}</span>
+                    <Show when={member.role}>
+                      <span class="info-cast-role">{member.role}</span>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </div>
+          </section>
+        </Show>
+
+        {/* Crew */}
+        <Show when={(details()?.Director ?? []).length > 0 || (details()?.Writer ?? []).length > 0}>
+          <section class="info-section info-crew-section">
+            <Show when={(details()?.Director ?? []).length > 0}>
+              <div class="info-crew-block">
+                <h2 class="info-section-label">Director</h2>
+                <p class="info-crew-names">{details()?.Director?.map(d => d.tag).join(", ")}</p>
+              </div>
+            </Show>
+            <Show when={(details()?.Writer ?? []).length > 0}>
+              <div class="info-crew-block">
+                <h2 class="info-section-label">Writer</h2>
+                <p class="info-crew-names">{details()?.Writer?.slice(0, 4).map(w => w.tag).join(", ")}</p>
+              </div>
+            </Show>
+          </section>
+        </Show>
+
+        {/* File tech info — only for playable media */}
+        <Show when={isPlayable() && media()}>
+          {(m) => (
+            <section class="info-section">
+              <h2 class="info-section-label">File Info</h2>
+              <dl class="info-file-grid">
+                <Show when={m().width && m().height}>
+                  <div class="info-file-pair"><dt>Resolution</dt><dd>{m().width}×{m().height}</dd></div>
+                </Show>
+                <Show when={m().videoCodec}>
+                  <div class="info-file-pair"><dt>Video</dt><dd>{codecLabel(m().videoCodec, VIDEO_CODEC)}</dd></div>
+                </Show>
+                <Show when={m().audioCodec}>
+                  <div class="info-file-pair">
+                    <dt>Audio</dt>
+                    <dd>{codecLabel(m().audioCodec, AUDIO_CODEC)}{m().audioChannels ? ` · ${m().audioChannels}ch` : ""}</dd>
+                  </div>
+                </Show>
+                <Show when={m().container}>
+                  <div class="info-file-pair"><dt>Container</dt><dd>{m().container?.toUpperCase()}</dd></div>
+                </Show>
+                <Show when={m().videoFrameRate}>
+                  <div class="info-file-pair"><dt>Frame Rate</dt><dd>{m().videoFrameRate}</dd></div>
+                </Show>
+                <Show when={m().bitrate}>
+                  <div class="info-file-pair">
+                    <dt>Bitrate</dt>
+                    <dd>{((m().bitrate ?? 0) / 1000).toFixed(1)} Mbps</dd>
+                  </div>
+                </Show>
+              </dl>
+            </section>
+          )}
+        </Show>
+
+        {/* Country */}
+        <Show when={(details()?.Country ?? []).length > 0}>
+          <section class="info-section">
+            <h2 class="info-section-label">Country</h2>
+            <p class="info-crew-names">{details()?.Country?.map(c => c.tag).join(", ")}</p>
+          </section>
+        </Show>
+      </div>
     </div>
   );
 }

@@ -7,7 +7,7 @@ import {
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView } from "./components";
+import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView, InfoView } from "./components";
 import {
   status, setStatus,
   demo, setDemo,
@@ -21,7 +21,8 @@ import {
 type PlayerLayer  = { kind: "player";  item: Item };
 type LibraryLayer = { kind: "library"; sectionKey: string; title: string; sectionType: string };
 type DetailLayer  = { kind: "detail";  item: Item };
-type NavLayer = PlayerLayer | LibraryLayer | DetailLayer;
+type InfoLayer    = { kind: "info";    item: Item };
+type NavLayer = PlayerLayer | LibraryLayer | DetailLayer | InfoLayer;
 
 // ── App ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ export function App() {
   const playerLayer = (): PlayerLayer  | null => { const l = topLayer(); return l?.kind === "player"  ? l : null; };
   const libraryLayer= (): LibraryLayer | null => { const l = topLayer(); return l?.kind === "library" ? l : null; };
   const detailLayer = (): DetailLayer  | null => { const l = topLayer(); return l?.kind === "detail"  ? l : null; };
+  const infoLayer   = (): InfoLayer    | null => { const l = topLayer(); return l?.kind === "info"    ? l : null; };
 
   onMount(() => {
     // Seed the history so the first back button pops our layers, not the browser tab
@@ -69,13 +71,16 @@ export function App() {
     history.back();
   }
 
-  // Route an item click: container types open a detail view; media opens the player.
+  // Route an item click.
+  // Episodes and tracks play immediately. Seasons drill to episode list.
+  // Everything else (movie, show, artist, album) opens the info page first.
   function handleItemClick(item: Item) {
-    const containers = ["show", "artist", "album", "season"];
-    if (containers.includes(item.type)) {
+    if (item.type === "episode" || item.type === "track") {
+      pushLayer({ kind: "player", item });
+    } else if (item.type === "season") {
       pushLayer({ kind: "detail", item });
     } else {
-      pushLayer({ kind: "player", item });
+      pushLayer({ kind: "info", item });
     }
   }
 
@@ -248,6 +253,16 @@ export function App() {
               sectionType={l().sectionType}
               onClose={goBack}
               onItemClick={handleItemClick}
+            />
+          )}
+        </Match>
+        <Match when={infoLayer()}>
+          {(l) => (
+            <InfoView
+              item={l().item}
+              onClose={goBack}
+              onPlay={(item) => pushLayer({ kind: "player", item })}
+              onBrowseChildren={(item) => pushLayer({ kind: "detail", item })}
             />
           )}
         </Match>

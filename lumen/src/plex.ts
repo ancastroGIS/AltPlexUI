@@ -98,6 +98,18 @@ export function plexAuthUrl(code: string): string {
   return `https://app.plex.tv/auth#?${params.toString()}`;
 }
 
+export interface MediaStream {
+  bitrate?: number;
+  width?: number;
+  height?: number;
+  audioChannels?: number;
+  audioCodec?: string;
+  videoCodec?: string;
+  videoResolution?: string;
+  container?: string;
+  videoFrameRate?: string;
+}
+
 export interface Item {
   ratingKey: string;
   type: string;
@@ -115,8 +127,22 @@ export interface Item {
   viewOffset?: number;
   contentRating?: string;
   Genre?: { tag: string }[];
-  leafCount?: number;      // total episodes in a show/season
-  viewedLeafCount?: number; // watched episodes
+  leafCount?: number;
+  viewedLeafCount?: number;
+  // Detail fields — populated by getDetails(), may be undefined on list items
+  tagline?: string;
+  summary?: string;
+  studio?: string;
+  Country?: { tag: string }[];
+  Director?: { tag: string }[];
+  Writer?: { tag: string }[];
+  Role?: { tag: string; role?: string; thumb?: string }[];
+  rating?: number;
+  audienceRating?: number;
+  ratingImage?: string;
+  audienceRatingImage?: string;
+  Guid?: { id: string }[];
+  Media?: MediaStream[];
 }
 export interface Hub {
   title: string;
@@ -149,6 +175,14 @@ export async function getSections(): Promise<Section[]> {
     title: d.title,
     type: d.type,
   }));
+}
+
+// Full metadata for a single item — synopsis, cast, crew, file tech info, etc.
+export async function getDetails(ratingKey: string): Promise<Item> {
+  const mc = await api(`/library/metadata/${ratingKey}`);
+  const raw = mc.Metadata?.[0];
+  if (!raw) throw new Error("Item not found");
+  return raw as Item;
 }
 
 // All items in a library section (for full-library browsing).
