@@ -18,6 +18,16 @@ server {
         proxy_read_timeout 3600s;     # long-lived media connections
     }
 
+    # Proxy to plex.tv for sign-in — keeps credentials same-origin, no CORS.
+    location /plextv/ {
+        proxy_pass https://plex.tv/;
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Host plex.tv;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Connection "";
+    }
+
     # SPA: serve the file if it exists, otherwise fall back to index.html.
     location / {
         try_files $uri $uri/ /index.html;

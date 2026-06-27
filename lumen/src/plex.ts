@@ -1,6 +1,8 @@
 // src/plex.ts — talks to the same-origin /plex proxy (nginx in prod, Vite in dev)
 const BASE = "/plex";
+const PLEX_TV = "/plextv";
 const LS_TOKEN = "lumen_token";
+const LS_CLIENT_ID = "lumen_client_id";
 
 export function getToken() {
   return localStorage.getItem(LS_TOKEN) || "";
@@ -10,6 +12,37 @@ export function setToken(t: string) {
 }
 export function clearToken() {
   localStorage.removeItem(LS_TOKEN);
+}
+
+export function getClientId(): string {
+  let id = localStorage.getItem(LS_CLIENT_ID);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(LS_CLIENT_ID, id);
+  }
+  return id;
+}
+
+// Exchange Plex.tv credentials for an auth token, then persist it.
+// The password is never stored — only the resulting token.
+export async function signIn(username: string, password: string): Promise<void> {
+  const res = await fetch(`${PLEX_TV}/users/sign_in.json`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Plex-Client-Identifier": getClientId(),
+      "X-Plex-Product": "Lumen",
+      "X-Plex-Version": "1.0",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({ "user[login]": username, "user[password]": password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({})) as Record<string, string>;
+    throw new Error(body.error ?? `Sign in failed (${res.status})`);
+  }
+  const body = await res.json() as { user: { authToken: string } };
+  setToken(body.user.authToken);
 }
 
 export interface Item {
@@ -49,7 +82,7 @@ async function api(path: string) {
 
 export async function getIdentity(): Promise<string> {
   const mc = await api("/");
-  return mc.machineIdentifier;
+  return (mc.friendlyName as string) || (mc.machineIdentifier as string);
 }
 
 export async function getSections(): Promise<Section[]> {

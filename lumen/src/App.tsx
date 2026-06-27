@@ -1,6 +1,6 @@
 // src/App.tsx
 import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount } from "solid-js";
-import { getIdentity, getSections, getHubs, getToken, setToken, type Item, type Section } from "./plex";
+import { getIdentity, getSections, getHubs, getToken, setToken, clearToken, signIn, type Item, type Section } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
 import { Hero, Row, Setup, TopBar } from "./components";
@@ -24,15 +24,42 @@ export function App() {
     setStatus("connecting");
     setErrorMsg("");
     try {
-      const [, secs] = await Promise.all([getIdentity(), getSections()]);
+      const [name, secs] = await Promise.all([getIdentity(), getSections()]);
       setSections(secs);
-      setServerName("Plex");
+      setServerName(name);
       setDemo(false);
       setStatus("ready");
     } catch {
       setErrorMsg("Couldn't reach your server. Check the address and token, then try again.");
       setStatus("error");
     }
+  }
+
+  async function handleSignIn(username: string, password: string) {
+    setStatus("connecting");
+    setErrorMsg("");
+    try {
+      await signIn(username, password);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "";
+      if (msg.toLowerCase().includes("two-factor") || msg.includes("1029")) {
+        setErrorMsg("Two-factor auth isn't supported via password — use a Plex token instead.");
+      } else {
+        setErrorMsg(msg || "Couldn't sign in. Check your email and password.");
+      }
+      setStatus("error");
+      return;
+    }
+    await connect();
+  }
+
+  function handleSignOut() {
+    clearToken();
+    setSections([]);
+    setServerName("");
+    setErrorMsg("");
+    setDemo(false);
+    setStatus("setup");
   }
 
   function startDemo() {
@@ -66,6 +93,7 @@ export function App() {
       fallback={
         <Setup
           onConnect={(t) => { setToken(t); connect(); }}
+          onSignIn={handleSignIn}
           onDemo={startDemo}
           error={status() === "error" ? errorMsg() : undefined}
           busy={status() === "connecting"}
@@ -73,7 +101,7 @@ export function App() {
       }
     >
       <div class="app">
-        <TopBar sections={sections()} />
+        <TopBar sections={sections()} onSignOut={handleSignOut} />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           <Show when={home()} keyed>
             {(data) => (

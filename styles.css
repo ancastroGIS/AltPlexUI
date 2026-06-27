@@ -117,6 +117,16 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--accent);
 }
 .topbar-right { display: flex; align-items: center; gap: 0.75rem; color: var(--text-dim); font-size: 0.85rem; }
+.sign-out {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sign-out:hover { color: var(--text); background: var(--surface-2); }
 .badge {
   font-size: 0.7rem;
   letter-spacing: 0.08em;
@@ -256,6 +266,28 @@ button { font-family: inherit; cursor: pointer; }
   background: rgba(0, 0, 0, 0.55);
 }
 .progress-fill { display: block; height: 100%; background: var(--resume); }
+
+/* ---------- auth tabs ---------- */
+.auth-tabs {
+  display: flex;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  margin-bottom: 1.2rem;
+  gap: 2px;
+}
+.auth-tab {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.4rem 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.auth-tab.active { background: var(--surface-2); color: var(--text); }
 
 /* ---------- setup ---------- */
 .setup {

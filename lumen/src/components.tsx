@@ -41,7 +41,7 @@ function metaLine(it: Item): string {
   return bits.join("  ·  ");
 }
 
-export function TopBar(props: { sections: Section[] }) {
+export function TopBar(props: { sections: Section[]; onSignOut: () => void }) {
   return (
     <header class="topbar">
       <div class="wordmark">
@@ -75,6 +75,7 @@ export function TopBar(props: { sections: Section[] }) {
         <Show when={serverName()}>
           <span class="server">{serverName()}</span>
         </Show>
+        <button class="sign-out" onClick={props.onSignOut}>Sign out</button>
       </div>
     </header>
   );
@@ -136,11 +137,25 @@ export function Row(props: { hub: Hub }) {
 
 export function Setup(props: {
   onConnect: (token: string) => void;
+  onSignIn: (username: string, password: string) => void;
   onDemo: () => void;
   error?: string;
   busy?: boolean;
 }) {
+  const [mode, setMode] = createSignal<"login" | "token">("login");
+  const [username, setUsername] = createSignal("");
+  const [password, setPassword] = createSignal("");
   const [token, setTokenInput] = createSignal("");
+  let passEl: HTMLInputElement | undefined;
+
+  const submit = () =>
+    mode() === "login"
+      ? props.onSignIn(username(), password())
+      : props.onConnect(token());
+
+  const canSubmit = () =>
+    !props.busy && (mode() === "login" ? !!username() && !!password() : !!token());
+
   return (
     <div class="setup">
       <div class="setup-card">
@@ -148,32 +163,90 @@ export function Setup(props: {
           <span class="mark" aria-hidden="true" />
           Lumen
         </div>
-        <p class="setup-lead">Connect to your Plex server to begin.</p>
-        <input
-          class="field"
-          type="password"
-          placeholder="Plex token"
-          value={token()}
-          onInput={(e) => setTokenInput(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === "Enter" && props.onConnect(token())}
-        />
+
+        <div class="auth-tabs">
+          <button
+            class="auth-tab"
+            classList={{ active: mode() === "login" }}
+            onClick={() => setMode("login")}
+          >
+            Sign In
+          </button>
+          <button
+            class="auth-tab"
+            classList={{ active: mode() === "token" }}
+            onClick={() => setMode("token")}
+          >
+            Token
+          </button>
+        </div>
+
+        <Show when={mode() === "login"}>
+          <input
+            class="field"
+            type="text"
+            placeholder="Email or username"
+            autocomplete="username"
+            value={username()}
+            onInput={(e) => setUsername(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && passEl?.focus()}
+          />
+          <input
+            ref={(el) => (passEl = el)}
+            class="field"
+            type="password"
+            placeholder="Password"
+            autocomplete="current-password"
+            value={password()}
+            onInput={(e) => setPassword(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
+          />
+        </Show>
+
+        <Show when={mode() === "token"}>
+          <input
+            class="field"
+            type="password"
+            placeholder="Plex token"
+            value={token()}
+            onInput={(e) => setTokenInput(e.currentTarget.value)}
+            onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
+          />
+        </Show>
+
         <Show when={props.error}>
           <p class="field-error">{props.error}</p>
         </Show>
+
         <button
           class="btn btn-primary wide"
-          disabled={props.busy || !token()}
-          onClick={() => props.onConnect(token())}
+          disabled={!canSubmit()}
+          onClick={submit}
         >
-          {props.busy ? "Connecting…" : "Connect"}
+          {props.busy
+            ? "Connecting…"
+            : mode() === "login"
+            ? "Sign In"
+            : "Connect"}
         </button>
+
         <button class="link" onClick={props.onDemo}>
           Explore the demo instead
         </button>
-        <p class="setup-hint">
-          Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
-          then copy <code>X-Plex-Token</code> from the address bar.
-        </p>
+
+        <Show when={mode() === "login"}>
+          <p class="setup-hint">
+            Your password is never stored — only the resulting session token is saved locally.
+            If you have two-factor authentication enabled, use the Token tab instead.
+          </p>
+        </Show>
+
+        <Show when={mode() === "token"}>
+          <p class="setup-hint">
+            Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
+            then copy <code>X-Plex-Token</code> from the address bar.
+          </p>
+        </Show>
       </div>
     </div>
   );
