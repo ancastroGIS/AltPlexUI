@@ -17,6 +17,9 @@ export interface Item {
   type: string;
   title: string;
   grandparentTitle?: string;
+  parentTitle?: string;
+  parentIndex?: number;
+  index?: number;
   year?: number;
   thumb?: string;
   art?: string;

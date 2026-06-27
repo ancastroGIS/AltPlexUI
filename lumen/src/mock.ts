@@ -17,7 +17,7 @@ export const mockHubs: Hub[] = [
     hubIdentifier: "home.continue",
     Metadata: [
       mk("Nightfall Protocol", 2023, { duration: 6000, viewOffset: 2400, type: "movie" }),
-      mk("The Quiet Coast", 2024, { duration: 3000, viewOffset: 2100, type: "episode", grandparentTitle: "The Quiet Coast" }),
+      mk("Episode 4", 2024, { duration: 3000, viewOffset: 2100, type: "episode", grandparentTitle: "The Quiet Coast", parentIndex: 1, index: 4 }),
       mk("Saturn Bloom", 2022, { duration: 5400, viewOffset: 900, type: "movie" }),
       mk("Halcyon", 2021, { duration: 7200, viewOffset: 5400, type: "movie" }),
     ],
@@ -44,9 +44,12 @@ export const mockHubs: Hub[] = [
     title: "Albums",
     hubIdentifier: "music.recent",
     Metadata: [
-      mk("Low Country", 2023, { type: "album" }), mk("Held Light", 2024, { type: "album" }),
-      mk("Room Tone", 2022, { type: "album" }), mk("Coral", 2023, { type: "album" }),
-      mk("After Hours, Pt. 2", 2021, { type: "album" }), mk("Field Notes", 2024, { type: "album" }),
+      mk("Low Country", 2023, { type: "album", parentTitle: "Wren Alcott" }),
+      mk("Held Light", 2024, { type: "album", parentTitle: "Mira Solis" }),
+      mk("Room Tone", 2022, { type: "album", parentTitle: "The Deltas" }),
+      mk("Coral", 2023, { type: "album", parentTitle: "Jasper Lane" }),
+      mk("After Hours, Pt. 2", 2021, { type: "album", parentTitle: "Noa Veil" }),
+      mk("Field Notes", 2024, { type: "album", parentTitle: "Sundial" }),
     ],
   },
 ];

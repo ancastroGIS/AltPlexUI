@@ -9,6 +9,30 @@ import {
   demo,
 } from "./store";
 
+function pad2(n: number | undefined): string {
+  return n != null ? String(n).padStart(2, "0") : "";
+}
+
+function tileLabel(it: Item): string {
+  switch (it.type) {
+    case "movie":
+      return it.year ? `${it.title} – ${it.year}` : it.title;
+    case "episode": {
+      const show = it.grandparentTitle ?? it.title;
+      const s = it.parentIndex != null ? `S${pad2(it.parentIndex)}` : "";
+      const e = it.index != null ? `E${pad2(it.index)}` : "";
+      const se = `${s}${e}`;
+      return se ? `${show} – ${se}` : show;
+    }
+    case "album":
+      return it.parentTitle ? `${it.parentTitle} – ${it.title}` : it.title;
+    case "track":
+      return it.grandparentTitle ? `${it.grandparentTitle} – ${it.title}` : it.title;
+    default:
+      return it.year ? `${it.title} – ${it.year}` : (it.grandparentTitle ?? it.title);
+  }
+}
+
 function metaLine(it: Item): string {
   const bits: string[] = [];
   if (it.year) bits.push(String(it.year));
@@ -94,9 +118,7 @@ export function Tile(props: { item: Item }) {
           </span>
         </Show>
       </div>
-      <span class="tile-title">
-        {it.grandparentTitle ?? it.title}
-      </span>
+      <span class="tile-title">{tileLabel(it)}</span>
     </button>
   );
 }
