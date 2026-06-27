@@ -2,12 +2,12 @@
 import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import {
   getIdentity, getSections, getHubs, getToken, setToken, clearToken,
-  signIn, createPin, checkPin, plexAuthUrl, PlexError,
+  createPin, checkPin, plexAuthUrl, PlexError,
   type Item, type Section,
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar } from "./components";
+import { Hero, Row, Setup, TopBar, Player } from "./components";
 import {
   status, setStatus,
   demo, setDemo,
@@ -18,6 +18,7 @@ import {
 
 export function App() {
   const [sections, setSections] = createSignal<Section[]>([]);
+  const [playingItem, setPlayingItem] = createSignal<Item | null>(null);
   let stopPoll: (() => void) | undefined;
 
   onMount(() => {
@@ -41,24 +42,6 @@ export function App() {
     }
   }
 
-  async function handleSignIn(username: string, password: string) {
-    setStatus("connecting");
-    setErrorMsg("");
-    try {
-      await signIn(username, password);
-    } catch (e: unknown) {
-      if (e instanceof PlexError && e.code === 1029) {
-        // 2FA required — silently switch to PIN flow
-        await startPinFlow();
-        return;
-      }
-      setErrorMsg(e instanceof Error ? e.message : "Couldn't sign in. Check your email and password.");
-      setStatus("error");
-      return;
-    }
-    await connect();
-  }
-
   async function startPinFlow() {
     setStatus("connecting");
     setErrorMsg("");
@@ -68,8 +51,9 @@ export function App() {
       setPinData({ id: pin.id, code: pin.code, authUrl });
       setStatus("pin");
       beginPolling(pin.id);
-    } catch {
-      setErrorMsg("Failed to start Plex sign-in. Please try again.");
+    } catch (e: unknown) {
+      const msg = e instanceof PlexError ? e.message : "Failed to start Plex sign-in. Please try again.";
+      setErrorMsg(msg);
       setStatus("error");
     }
   }
@@ -77,7 +61,7 @@ export function App() {
   function beginPolling(pinId: number) {
     stopPoll?.();
     let stopped = false;
-    const deadline = Date.now() + 5 * 60 * 1000; // 5-minute window
+    const deadline = Date.now() + 5 * 60 * 1000;
 
     async function tick() {
       if (stopped) return;
@@ -95,7 +79,7 @@ export function App() {
           await connect();
           return;
         }
-      } catch { /* ignore transient poll errors, keep trying */ }
+      } catch { /* ignore transient poll errors */ }
       if (!stopped) setTimeout(tick, 2000);
     }
 
@@ -119,6 +103,7 @@ export function App() {
     setServerName("");
     setErrorMsg("");
     setPinData(null);
+    setPlayingItem(null);
     setDemo(false);
     setStatus("setup");
   }
@@ -154,7 +139,6 @@ export function App() {
       fallback={
         <Setup
           onConnect={(t) => { setToken(t); connect(); }}
-          onSignIn={handleSignIn}
           onStartPin={startPinFlow}
           onCancelPin={cancelPin}
           onDemo={startDemo}
@@ -174,7 +158,9 @@ export function App() {
               <main>
                 <Show when={data.hero}>{(h) => <Hero item={h()} />}</Show>
                 <div class="rows">
-                  <For each={data.hubs}>{(hub) => <Row hub={hub} />}</For>
+                  <For each={data.hubs}>
+                    {(hub) => <Row hub={hub} onPlay={setPlayingItem} />}
+                  </For>
                   <Show when={data.hubs.length === 0}>
                     <p class="empty">Nothing here yet. Add media to this library and it'll show up.</p>
                   </Show>
@@ -184,6 +170,9 @@ export function App() {
           </Show>
         </Suspense>
       </div>
+      <Show when={playingItem()}>
+        {(item) => <Player item={item()} onClose={() => setPlayingItem(null)} />}
+      </Show>
     </Show>
   );
 }

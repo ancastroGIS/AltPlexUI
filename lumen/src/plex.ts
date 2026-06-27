@@ -154,6 +154,36 @@ export async function getHubs(sectionKey?: string): Promise<Hub[]> {
   return (mc.Hub || []).filter((h: any) => (h.Metadata || []).length > 0);
 }
 
+export async function getMediaPart(ratingKey: string): Promise<{ key: string }> {
+  const mc = await api(`/library/metadata/${ratingKey}`);
+  const part = mc.Metadata?.[0]?.Media?.[0]?.Part?.[0];
+  if (!part?.key) throw new Error("No playable media found");
+  return { key: part.key as string };
+}
+
+// Direct-play URL served through the nginx /plex proxy.
+export function directPlayUrl(partKey: string): string {
+  return `${BASE}${partKey}?X-Plex-Token=${encodeURIComponent(getToken())}&download=0`;
+}
+
+// Fire-and-forget timeline report so Plex tracks resume position.
+export function reportProgress(
+  ratingKey: string,
+  timeMs: number,
+  durationMs: number,
+  state: "playing" | "paused" | "stopped"
+): void {
+  const params = new URLSearchParams({
+    ratingKey,
+    key: `/library/metadata/${ratingKey}`,
+    state,
+    time: String(Math.floor(timeMs)),
+    duration: String(Math.floor(durationMs)),
+    "X-Plex-Token": getToken(),
+  });
+  fetch(`${BASE}/:/timeline?${params}`).catch(() => {});
+}
+
 // Resized image via Plex's photo transcoder. ALWAYS request the size you render
 // at — decoding full-res posters into small tiles is a top cause of TV jank.
 export function img(path: string | undefined, w: number, h: number): string {

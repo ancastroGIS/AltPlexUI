@@ -1,6 +1,6 @@
 // src/components.tsx
-import { For, Show, createSignal, createEffect } from "solid-js";
-import type { Hub, Item, Section } from "./plex";
+import { For, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { getMediaPart, directPlayUrl, reportProgress, type Hub, type Item, type Section } from "./plex";
 import { poster, backdrop, progress } from "./media";
 import {
   activeSection,
@@ -40,6 +40,18 @@ function metaLine(it: Item): string {
   if (it.Genre?.length) bits.push(it.Genre.slice(0, 2).map((g) => g.tag).join(" / "));
   return bits.join("  ·  ");
 }
+
+function fmt(s: number): string {
+  if (!isFinite(s) || s < 0) return "0:00";
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/* ─── TopBar ─────────────────────────────────────────────────────────────── */
 
 export function TopBar(props: { sections: Section[]; onSignOut: () => void }) {
   return (
@@ -81,6 +93,8 @@ export function TopBar(props: { sections: Section[]; onSignOut: () => void }) {
   );
 }
 
+/* ─── Hero ───────────────────────────────────────────────────────────────── */
+
 export function Hero(props: { item: Item }) {
   const it = props.item;
   return (
@@ -101,12 +115,14 @@ export function Hero(props: { item: Item }) {
   );
 }
 
-export function Tile(props: { item: Item }) {
+/* ─── Tile / Row ─────────────────────────────────────────────────────────── */
+
+export function Tile(props: { item: Item; onPlay: (item: Item) => void }) {
   const it = props.item;
   const wide = it.type === "episode" || !!it.viewOffset;
   const p = progress(it);
   return (
-    <button class="tile" classList={{ wide }}>
+    <button class="tile" classList={{ wide }} onClick={() => props.onPlay(it)}>
       <div class="tile-art">
         <img
           src={wide ? backdrop(it, 480, 270) : poster(it)}
@@ -124,20 +140,190 @@ export function Tile(props: { item: Item }) {
   );
 }
 
-export function Row(props: { hub: Hub }) {
+export function Row(props: { hub: Hub; onPlay: (item: Item) => void }) {
   return (
     <section class="row">
       <h2 class="row-title">{props.hub.title}</h2>
       <div class="scroller">
-        <For each={props.hub.Metadata}>{(it) => <Tile item={it} />}</For>
+        <For each={props.hub.Metadata}>
+          {(it) => <Tile item={it} onPlay={props.onPlay} />}
+        </For>
       </div>
     </section>
   );
 }
 
+/* ─── Player ─────────────────────────────────────────────────────────────── */
+
+export function Player(props: { item: Item; onClose: () => void }) {
+  let videoEl: HTMLVideoElement | undefined;
+  let hideTimer: ReturnType<typeof setTimeout> | undefined;
+  let reportTimer: ReturnType<typeof setInterval> | undefined;
+
+  const [src, setSrc] = createSignal("");
+  const [loadError, setLoadError] = createSignal("");
+  const [loading, setLoading] = createSignal(true);
+  const [playing, setPlaying] = createSignal(false);
+  const [currentTime, setCurrentTime] = createSignal(0);
+  const [dur, setDur] = createSignal(0);
+  const [controlsHidden, setControlsHidden] = createSignal(false);
+  const [vol, setVol] = createSignal(1);
+
+  onMount(async () => {
+    window.addEventListener("keydown", onKey);
+    try {
+      const part = await getMediaPart(props.item.ratingKey);
+      setSrc(directPlayUrl(part.key));
+    } catch {
+      setLoadError("Couldn't load this item for playback.");
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  onCleanup(() => {
+    clearTimeout(hideTimer);
+    clearInterval(reportTimer);
+    window.removeEventListener("keydown", onKey);
+    if (videoEl && isFinite(videoEl.duration)) {
+      reportProgress(props.item.ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped");
+    }
+  });
+
+  function onKey(e: KeyboardEvent) {
+    if (e.key === "Escape") { props.onClose(); return; }
+    if (e.key === " ") { e.preventDefault(); togglePlay(); return; }
+    if (e.key === "ArrowRight" && videoEl) videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + 10);
+    if (e.key === "ArrowLeft" && videoEl) videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
+    showControlsBriefly();
+  }
+
+  function showControlsBriefly() {
+    setControlsHidden(false);
+    clearTimeout(hideTimer);
+    if (playing()) hideTimer = setTimeout(() => setControlsHidden(true), 3000);
+  }
+
+  function togglePlay() {
+    if (!videoEl) return;
+    videoEl.paused ? videoEl.play() : videoEl.pause();
+  }
+
+  function onVideoPlay() {
+    setPlaying(true);
+    showControlsBriefly();
+    clearInterval(reportTimer);
+    reportTimer = setInterval(() => {
+      if (videoEl) reportProgress(props.item.ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing");
+    }, 10000);
+  }
+
+  function onVideoPause() {
+    setPlaying(false);
+    clearInterval(reportTimer);
+    setControlsHidden(false);
+    if (videoEl) reportProgress(props.item.ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+  }
+
+  function onLoadedMetadata() {
+    if (!videoEl) return;
+    setDur(videoEl.duration);
+    if (props.item.viewOffset) videoEl.currentTime = props.item.viewOffset / 1000;
+    videoEl.play().catch(() => {});
+  }
+
+  function onTimeUpdate() {
+    if (videoEl) setCurrentTime(videoEl.currentTime);
+  }
+
+  function onVideoError() {
+    setLoadError("Playback failed — this format may not be supported by your browser. Try Chrome or enable server-side transcoding.");
+    setLoading(false);
+  }
+
+  return (
+    <div
+      class="player"
+      classList={{ "controls-hidden": controlsHidden() }}
+      onMouseMove={showControlsBriefly}
+      onClick={togglePlay}
+    >
+      {/* Loading */}
+      <Show when={loading()}>
+        <div class="player-loading"><div class="pin-spinner" /></div>
+      </Show>
+
+      {/* Error */}
+      <Show when={loadError()}>
+        <div class="player-error">
+          <p>{loadError()}</p>
+          <button class="btn btn-ghost" onClick={(e) => { e.stopPropagation(); props.onClose(); }}>Close</button>
+        </div>
+      </Show>
+
+      {/* Video */}
+      <Show when={src()}>
+        <video
+          ref={(el) => (videoEl = el)}
+          src={src()}
+          onPlay={onVideoPlay}
+          onPause={onVideoPause}
+          onTimeUpdate={onTimeUpdate}
+          onLoadedMetadata={onLoadedMetadata}
+          onError={onVideoError}
+        />
+      </Show>
+
+      {/* Controls overlay — pointer-events: none on container, auto on top/bottom bars */}
+      <Show when={!loadError()}>
+        <div class="player-ui" classList={{ hidden: controlsHidden() }}>
+          <div class="player-top" onClick={(e) => e.stopPropagation()}>
+            <button class="player-close" onClick={props.onClose}>✕</button>
+            <span class="player-title">{tileLabel(props.item)}</span>
+          </div>
+
+          <div class="player-bottom" onClick={(e) => e.stopPropagation()}>
+            <input
+              class="player-seek"
+              type="range"
+              min="0"
+              max={dur() || 100}
+              step="1"
+              value={currentTime()}
+              onInput={(e) => { if (videoEl) { videoEl.currentTime = Number(e.currentTarget.value); setCurrentTime(videoEl.currentTime); } }}
+            />
+            <div class="player-row">
+              <button class="player-btn" onClick={togglePlay}>
+                {playing() ? "❚❚" : "▶"}
+              </button>
+              <span class="player-time">{fmt(currentTime())} / {fmt(dur())}</span>
+              <div class="player-spacer" />
+              <input
+                class="player-volume"
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={vol()}
+                onInput={(e) => {
+                  const v = Number(e.currentTarget.value);
+                  setVol(v);
+                  if (videoEl) videoEl.volume = v;
+                }}
+              />
+              <button class="player-btn" onClick={() => videoEl?.requestFullscreen()}>⛶</button>
+            </div>
+          </div>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/* ─── Setup ──────────────────────────────────────────────────────────────── */
+
 export function Setup(props: {
   onConnect: (token: string) => void;
-  onSignIn: (username: string, password: string) => void;
   onStartPin: () => void;
   onCancelPin: () => void;
   onDemo: () => void;
@@ -147,26 +333,14 @@ export function Setup(props: {
   pinCode?: string;
   pinAuthUrl?: string;
 }) {
-  const [mode, setMode] = createSignal<"login" | "token">("login");
-  const [username, setUsername] = createSignal("");
-  const [password, setPassword] = createSignal("");
+  const [showToken, setShowToken] = createSignal(false);
   const [token, setTokenInput] = createSignal("");
-  let passEl: HTMLInputElement | undefined;
 
-  // Auto-open the Plex auth popup whenever the PIN flow starts.
   createEffect(() => {
     if (props.pinMode && props.pinAuthUrl) {
       window.open(props.pinAuthUrl, "plexauth", "width=800,height=700,left=200,top=100");
     }
   });
-
-  const submit = () =>
-    mode() === "login"
-      ? props.onSignIn(username(), password())
-      : props.onConnect(token());
-
-  const canSubmit = () =>
-    !props.busy && (mode() === "login" ? !!username() && !!password() : !!token());
 
   return (
     <div class="setup">
@@ -176,7 +350,7 @@ export function Setup(props: {
           Lumen
         </div>
 
-        {/* PIN waiting state — replaces the form entirely */}
+        {/* PIN waiting state */}
         <Show when={props.pinMode}>
           <div class="pin-waiting">
             <div class="pin-spinner" />
@@ -188,10 +362,7 @@ export function Setup(props: {
             <p class="pin-code">{props.pinCode}</p>
             <button
               class="btn btn-ghost wide"
-              onClick={() =>
-                props.pinAuthUrl &&
-                window.open(props.pinAuthUrl, "plexauth", "width=800,height=700,left=200,top=100")
-              }
+              onClick={() => props.pinAuthUrl && window.open(props.pinAuthUrl, "plexauth", "width=800,height=700,left=200,top=100")}
             >
               Open sign-in window again
             </button>
@@ -199,97 +370,54 @@ export function Setup(props: {
           </div>
         </Show>
 
-        {/* Normal auth UI */}
+        {/* Normal auth */}
         <Show when={!props.pinMode}>
-          <div class="auth-tabs">
-            <button
-              class="auth-tab"
-              classList={{ active: mode() === "login" }}
-              onClick={() => setMode("login")}
-            >
-              Sign In
-            </button>
-            <button
-              class="auth-tab"
-              classList={{ active: mode() === "token" }}
-              onClick={() => setMode("token")}
-            >
-              Token
-            </button>
-          </div>
+          <button
+            class="btn btn-primary wide"
+            disabled={props.busy}
+            onClick={props.onStartPin}
+          >
+            {props.busy ? "Connecting…" : "Sign in with Plex"}
+          </button>
 
-          <Show when={mode() === "login"}>
-            <input
-              class="field"
-              type="text"
-              placeholder="Email or username"
-              autocomplete="username"
-              value={username()}
-              onInput={(e) => setUsername(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && passEl?.focus()}
-            />
-            <input
-              ref={(el) => (passEl = el)}
-              class="field"
-              type="password"
-              placeholder="Password"
-              autocomplete="current-password"
-              value={password()}
-              onInput={(e) => setPassword(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
-            />
-          </Show>
+          <div class="auth-divider"><span>or</span></div>
 
-          <Show when={mode() === "token"}>
+          <Show
+            when={showToken()}
+            fallback={
+              <button class="link" onClick={() => setShowToken(true)}>
+                Use a Plex token instead
+              </button>
+            }
+          >
             <input
               class="field"
               type="password"
               placeholder="Plex token"
               value={token()}
               onInput={(e) => setTokenInput(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
+              onKeyDown={(e) => e.key === "Enter" && token() && !props.busy && props.onConnect(token())}
             />
+            <button
+              class="btn btn-ghost wide"
+              disabled={!token() || props.busy}
+              onClick={() => props.onConnect(token())}
+            >
+              {props.busy ? "Connecting…" : "Connect with token"}
+            </button>
+            <p class="setup-hint">
+              Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
+              then copy <code>X-Plex-Token</code> from the address bar.
+            </p>
           </Show>
 
           <Show when={props.error}>
             <p class="field-error">{props.error}</p>
           </Show>
 
-          <button
-            class="btn btn-primary wide"
-            disabled={!canSubmit()}
-            onClick={submit}
-          >
-            {props.busy
-              ? "Connecting…"
-              : mode() === "login"
-              ? "Sign In"
-              : "Connect"}
-          </button>
-
-          <Show when={mode() === "login"}>
-            <button class="link" style={{ "margin-top": "0.75rem" }} onClick={props.onStartPin}>
-              Sign in with Plex instead ↗
-            </button>
-          </Show>
-
           <button class="link" onClick={props.onDemo}>
             Explore the demo instead
           </button>
-
-          <Show when={mode() === "login"}>
-            <p class="setup-hint">
-              Your password is never stored — only the resulting session token is saved locally.
-              If you have 2FA enabled, sign in with Plex above or use the Token tab.
-            </p>
-          </Show>
-
-          <Show when={mode() === "token"}>
-            <p class="setup-hint">
-              Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
-              then copy <code>X-Plex-Token</code> from the address bar.
-            </p>
-          </Show>
         </Show>
       </div>
     </div>
