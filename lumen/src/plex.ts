@@ -171,6 +171,50 @@ export async function getHubs(sectionKey?: string): Promise<Hub[]> {
   return (mc.Hub || []).filter((h: any) => (h.Metadata || []).length > 0);
 }
 
+// Generate a unique ID for a transcode session.
+export function newSessionId(): string {
+  return uuid();
+}
+
+// Build a Plex Universal Transcode HLS URL.
+// directPlay=1 + directStream=1 tells Plex to:
+//   1. Serve the raw file if the client can handle it (no Plex work)
+//   2. Remux the container without re-encoding video if needed (fast)
+//   3. Fully transcode only when the codec is incompatible (HEVC, AC3, etc.)
+// The response is always an HLS .m3u8 manifest.
+export function buildHlsUrl(ratingKey: string, sessionId: string): string {
+  const params = new URLSearchParams({
+    path: `/library/metadata/${ratingKey}`,
+    mediaIndex: "0",
+    partIndex: "0",
+    protocol: "hls",
+    fastSeek: "1",
+    directPlay: "1",
+    directStream: "1",
+    videoResolution: "1920x1080",
+    maxVideoBitrate: "20000",
+    videoBitrate: "20000",
+    audioBoost: "100",
+    "X-Plex-Token": getToken(),
+    "X-Plex-Client-Identifier": getClientId(),
+    "X-Plex-Platform": "Chrome",
+    "X-Plex-Product": "Lumen",
+    "X-Plex-Version": "1.0",
+    "X-Plex-Session-Identifier": sessionId,
+  });
+  return `${BASE}/video/:/transcode/universal/start.m3u8?${params}`;
+}
+
+// Tell the Plex server to release the transcode process for this session.
+// Call on player close so the server doesn't keep a ghost transcode running.
+export function stopTranscodeSession(sessionId: string): void {
+  const params = new URLSearchParams({
+    session: sessionId,
+    "X-Plex-Token": getToken(),
+  });
+  fetch(`${BASE}/video/:/transcode/universal/stop?${params}`).catch(() => {});
+}
+
 export async function getMediaPart(ratingKey: string): Promise<{ key: string }> {
   const mc = await api(`/library/metadata/${ratingKey}`);
   const part = mc.Metadata?.[0]?.Media?.[0]?.Part?.[0];

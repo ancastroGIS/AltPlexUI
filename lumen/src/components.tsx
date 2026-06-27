@@ -1,7 +1,8 @@
 // src/components.tsx
 import { For, Show, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import Hls from "hls.js";
 import {
-  getMediaPart, directPlayUrl, reportProgress,
+  buildHlsUrl, newSessionId, stopTranscodeSession, reportProgress,
   getAllItems, getChildren,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -340,62 +341,124 @@ export function DetailView(props: {
 }
 
 // ── Player ─────────────────────────────────────────────────────────────────
+// Rewrite root-relative Plex paths (/video/...) to go through the /plex proxy.
+// Plex HLS manifests often use paths like /video/:/transcode/... which would
+// bypass nginx if requested directly from the browser origin.
+function proxyUrl(url: string): string {
+  if (url.startsWith("/") && !url.startsWith("/plex/")) return "/plex" + url;
+  if (/^https?:\/\//.test(url)) {
+    try {
+      const u = new URL(url);
+      if (/^\/(video|library|photo|hubs)\//.test(u.pathname)) return "/plex" + u.pathname + u.search;
+    } catch { /* ignore */ }
+  }
+  return url;
+}
 
 export function Player(props: { item: Item; onClose: () => void }) {
-  let videoEl: HTMLVideoElement | undefined;
+  let videoEl!: HTMLVideoElement;
+  let hls: Hls | null = null;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let reportTimer: ReturnType<typeof setInterval> | undefined;
 
+  const sessionId = newSessionId(); // stable for this player's lifetime
   const [currentItem, setCurrentItem] = createSignal(props.item);
+  const [loading, setLoading] = createSignal(true);
+  const [loadError, setLoadError] = createSignal("");
   const [playing, setPlaying] = createSignal(false);
   const [currentTime, setCurrentTime] = createSignal(0);
   const [dur, setDur] = createSignal(0);
   const [controlsHidden, setControlsHidden] = createSignal(false);
   const [vol, setVol] = createSignal(1);
 
-  // Load media URL reactively whenever currentItem changes
-  const [mediaUrl] = createResource(currentItem, async (item) => {
-    const part = await getMediaPart(item.ratingKey);
-    return directPlayUrl(part.key);
-  });
-
-  // Load sibling episodes when playing an episode
+  // Load sibling episodes (for prev/next) when playing an episode
   const [siblings] = createResource(
-    () => {
-      const it = currentItem();
-      return it.type === "episode" && it.parentRatingKey ? it.parentRatingKey : null;
-    },
+    () => { const it = currentItem(); return it.type === "episode" && it.parentRatingKey ? it.parentRatingKey : null; },
     (parentKey) => getChildren(parentKey)
   );
-
   const currentIdx = () => (siblings() ?? []).findIndex((ep) => ep.ratingKey === currentItem().ratingKey);
-  const prevEp     = () => { const i = currentIdx(); return i > 0 ? (siblings()!)[i - 1] : null; };
-  const nextEp     = () => { const s = siblings() ?? []; const i = currentIdx(); return i >= 0 && i < s.length - 1 ? s[i + 1] : null; };
+  const prevEp = () => { const i = currentIdx(); return i > 0 ? (siblings()!)[i - 1] : null; };
+  const nextEp = () => { const s = siblings() ?? []; const i = currentIdx(); return i >= 0 && i < s.length - 1 ? s[i + 1] : null; };
 
-  onMount(() => { window.addEventListener("keydown", onKey); });
+  onMount(() => {
+    window.addEventListener("keydown", onKey);
+    loadItem(currentItem());
+  });
+
   onCleanup(() => {
     clearTimeout(hideTimer);
     clearInterval(reportTimer);
     window.removeEventListener("keydown", onKey);
-    if (videoEl && isFinite(videoEl.duration)) {
+    destroyHls();
+    stopTranscodeSession(sessionId);
+    if (isFinite(videoEl?.duration)) {
       reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped");
     }
   });
 
-  // Reset display state when item changes so seek bar and time clear immediately
-  createEffect(() => {
-    currentItem(); // track the signal
+  function destroyHls() {
+    if (hls) { hls.destroy(); hls = null; }
+  }
+
+  function loadItem(item: Item) {
+    setLoading(true);
+    setLoadError("");
     setCurrentTime(0);
     setDur(0);
     setPlaying(false);
     clearInterval(reportTimer);
-  });
+    destroyHls();
+
+    const hlsUrl = buildHlsUrl(item.ratingKey, sessionId);
+
+    if (Hls.isSupported()) {
+      hls = new Hls({
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        // Rewrite any root-relative or absolute Plex server URLs so they
+        // go through the /plex nginx proxy instead of hitting the server directly.
+        fetchSetup: (context, initParams) => new Request(proxyUrl(context.url), initParams),
+        xhrSetup: (xhr, url) => {
+          const rewritten = proxyUrl(url);
+          if (rewritten !== url) xhr.open("GET", rewritten, true);
+        },
+      });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(videoEl);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setLoading(false);
+        const offset = item.viewOffset;
+        if (offset && offset > 0) videoEl.currentTime = offset / 1000;
+        videoEl.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          setLoadError("Stream unavailable — your server may not support transcoding for this item.");
+          setLoading(false);
+        }
+      });
+    } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+      // Safari has native HLS support
+      videoEl.src = hlsUrl;
+      const onMeta = () => {
+        setLoading(false);
+        const offset = item.viewOffset;
+        if (offset && offset > 0) videoEl.currentTime = offset / 1000;
+        videoEl.play().catch(() => {});
+        videoEl.removeEventListener("loadedmetadata", onMeta);
+      };
+      videoEl.addEventListener("loadedmetadata", onMeta);
+    } else {
+      setLoadError("HLS playback is not supported by this browser. Try Chrome, Firefox, or Safari.");
+      setLoading(false);
+    }
+  }
 
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape")      { e.preventDefault(); props.onClose(); return; }
-    if (e.key === " ")           { e.preventDefault(); togglePlay(); return; }
-    if (e.key === "ArrowRight" && videoEl) videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + 10);
-    if (e.key === "ArrowLeft"  && videoEl) videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
+    if (e.key === "Escape")     { e.preventDefault(); props.onClose(); return; }
+    if (e.key === " ")          { e.preventDefault(); togglePlay(); return; }
+    if (e.key === "ArrowRight") videoEl.currentTime = Math.min(videoEl.duration, videoEl.currentTime + 10);
+    if (e.key === "ArrowLeft")  videoEl.currentTime = Math.max(0, videoEl.currentTime - 10);
     showControlsBriefly();
   }
 
@@ -406,16 +469,15 @@ export function Player(props: { item: Item; onClose: () => void }) {
   }
 
   function togglePlay() {
-    if (!videoEl) return;
     videoEl.paused ? videoEl.play() : videoEl.pause();
   }
 
   function playItem(item: Item) {
-    if (videoEl && isFinite(videoEl.duration)) {
+    if (isFinite(videoEl?.duration)) {
       reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped");
     }
-    clearInterval(reportTimer);
     setCurrentItem(item);
+    loadItem(item);
   }
 
   function onVideoPlay() {
@@ -423,7 +485,9 @@ export function Player(props: { item: Item; onClose: () => void }) {
     showControlsBriefly();
     clearInterval(reportTimer);
     reportTimer = setInterval(() => {
-      if (videoEl) reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing");
+      if (isFinite(videoEl?.duration)) {
+        reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing");
+      }
     }, 10000);
   }
 
@@ -431,20 +495,13 @@ export function Player(props: { item: Item; onClose: () => void }) {
     setPlaying(false);
     clearInterval(reportTimer);
     setControlsHidden(false);
-    if (videoEl) reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+    if (isFinite(videoEl?.duration)) {
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+    }
   }
 
-  function onLoadedMetadata() {
-    if (!videoEl) return;
-    setDur(videoEl.duration);
-    const offset = currentItem().viewOffset;
-    if (offset && offset > 0) videoEl.currentTime = offset / 1000;
-    videoEl.play().catch(() => {});
-  }
-
-  function onTimeUpdate() {
-    if (videoEl) setCurrentTime(videoEl.currentTime);
-  }
+  function onTimeUpdate() { setCurrentTime(videoEl.currentTime); }
+  function onDurationChange() { if (isFinite(videoEl.duration)) setDur(videoEl.duration); }
 
   return (
     <div
@@ -453,36 +510,31 @@ export function Player(props: { item: Item; onClose: () => void }) {
       onMouseMove={showControlsBriefly}
       onClick={togglePlay}
     >
-      {/* Loading */}
-      <Show when={mediaUrl.loading}>
+      {/* Video element always in DOM so hls.js can attach to it */}
+      <video
+        ref={(el) => (videoEl = el)}
+        onPlay={onVideoPlay}
+        onPause={onVideoPause}
+        onTimeUpdate={onTimeUpdate}
+        onDurationChange={onDurationChange}
+        onError={() => { setLoadError("Video error — see console for details."); setLoading(false); }}
+      />
+
+      {/* Loading spinner */}
+      <Show when={loading()}>
         <div class="player-loading"><div class="pin-spinner" /></div>
       </Show>
 
-      {/* Error */}
-      <Show when={mediaUrl.error}>
+      {/* Fatal error state */}
+      <Show when={loadError()}>
         <div class="player-error">
-          <p>Playback failed. This format may not be supported by your browser, or the item isn't available.</p>
+          <p>{loadError()}</p>
           <button class="btn btn-ghost" onClick={(e) => { e.stopPropagation(); props.onClose(); }}>Close</button>
         </div>
       </Show>
 
-      {/* Video — only mount when URL is ready and not switching episodes */}
-      <Show when={!mediaUrl.loading && mediaUrl()}>
-        {(url) => (
-          <video
-            ref={(el) => (videoEl = el)}
-            src={url()}
-            onPlay={onVideoPlay}
-            onPause={onVideoPause}
-            onTimeUpdate={onTimeUpdate}
-            onLoadedMetadata={onLoadedMetadata}
-            onError={() => clearInterval(reportTimer)}
-          />
-        )}
-      </Show>
-
       {/* Controls overlay */}
-      <Show when={!mediaUrl.error}>
+      <Show when={!loadError()}>
         <div class="player-ui" classList={{ hidden: controlsHidden() }}>
 
           {/* Top bar */}
