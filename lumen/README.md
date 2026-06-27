@@ -25,7 +25,7 @@ View XML → copy `X-Plex-Token` from the URL), or **Explore the demo**.
 ## Deploy with Docker
 ```bash
 # edit PLEX_SERVER_URL in docker-compose.yml first
-docker compose up -d --build   # http://localhost:8080
+docker compose up -d --build   # http://localhost:7070
 ```
 The image builds the SPA and serves it from nginx; `PLEX_SERVER_URL` is injected
 into the proxy config at container start.

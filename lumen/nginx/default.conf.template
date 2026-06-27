@@ -1,7 +1,7 @@
 # nginx/default.conf.template
 # ${PLEX_SERVER_URL} is substituted at container start by the nginx image.
 server {
-    listen 80;
+    listen 70;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
