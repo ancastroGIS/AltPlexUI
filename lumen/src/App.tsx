@@ -1,6 +1,10 @@
 // src/App.tsx
 import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount } from "solid-js";
-import { getIdentity, getSections, getHubs, getToken, setToken, clearToken, signIn, type Item, type Section } from "./plex";
+import {
+  getIdentity, getSections, getHubs, getToken, setToken, clearToken,
+  signIn, createPin, checkPin, plexAuthUrl, PlexError,
+  type Item, type Section,
+} from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
 import { Hero, Row, Setup, TopBar } from "./components";
@@ -8,11 +12,13 @@ import {
   status, setStatus,
   demo, setDemo,
   setServerName, errorMsg, setErrorMsg,
+  pinData, setPinData,
   activeSection,
 } from "./store";
 
 export function App() {
   const [sections, setSections] = createSignal<Section[]>([]);
+  let stopPoll: (() => void) | undefined;
 
   onMount(() => {
     const cleanup = initSpatialNav();
@@ -41,23 +47,78 @@ export function App() {
     try {
       await signIn(username, password);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "";
-      if (msg.toLowerCase().includes("two-factor") || msg.includes("1029")) {
-        setErrorMsg("Two-factor auth isn't supported via password — use a Plex token instead.");
-      } else {
-        setErrorMsg(msg || "Couldn't sign in. Check your email and password.");
+      if (e instanceof PlexError && e.code === 1029) {
+        // 2FA required — silently switch to PIN flow
+        await startPinFlow();
+        return;
       }
+      setErrorMsg(e instanceof Error ? e.message : "Couldn't sign in. Check your email and password.");
       setStatus("error");
       return;
     }
     await connect();
   }
 
+  async function startPinFlow() {
+    setStatus("connecting");
+    setErrorMsg("");
+    try {
+      const pin = await createPin();
+      const authUrl = plexAuthUrl(pin.code);
+      setPinData({ id: pin.id, code: pin.code, authUrl });
+      setStatus("pin");
+      beginPolling(pin.id);
+    } catch {
+      setErrorMsg("Failed to start Plex sign-in. Please try again.");
+      setStatus("error");
+    }
+  }
+
+  function beginPolling(pinId: number) {
+    stopPoll?.();
+    let stopped = false;
+    const deadline = Date.now() + 5 * 60 * 1000; // 5-minute window
+
+    async function tick() {
+      if (stopped) return;
+      if (Date.now() > deadline) {
+        setPinData(null);
+        setErrorMsg("Sign-in timed out. Please try again.");
+        setStatus("error");
+        return;
+      }
+      try {
+        const token = await checkPin(pinId);
+        if (token) {
+          setToken(token);
+          setPinData(null);
+          await connect();
+          return;
+        }
+      } catch { /* ignore transient poll errors, keep trying */ }
+      if (!stopped) setTimeout(tick, 2000);
+    }
+
+    stopPoll = () => { stopped = true; };
+    setTimeout(tick, 2000);
+  }
+
+  function cancelPin() {
+    stopPoll?.();
+    stopPoll = undefined;
+    setPinData(null);
+    setErrorMsg("");
+    setStatus("setup");
+  }
+
   function handleSignOut() {
+    stopPoll?.();
+    stopPoll = undefined;
     clearToken();
     setSections([]);
     setServerName("");
     setErrorMsg("");
+    setPinData(null);
     setDemo(false);
     setStatus("setup");
   }
@@ -94,9 +155,14 @@ export function App() {
         <Setup
           onConnect={(t) => { setToken(t); connect(); }}
           onSignIn={handleSignIn}
+          onStartPin={startPinFlow}
+          onCancelPin={cancelPin}
           onDemo={startDemo}
           error={status() === "error" ? errorMsg() : undefined}
           busy={status() === "connecting"}
+          pinMode={status() === "pin"}
+          pinCode={pinData()?.code}
+          pinAuthUrl={pinData()?.authUrl}
         />
       }
     >
@@ -110,7 +176,7 @@ export function App() {
                 <div class="rows">
                   <For each={data.hubs}>{(hub) => <Row hub={hub} />}</For>
                   <Show when={data.hubs.length === 0}>
-                    <p class="empty">Nothing here yet. Add media to this library and it’ll show up.</p>
+                    <p class="empty">Nothing here yet. Add media to this library and it'll show up.</p>
                   </Show>
                 </div>
               </main>

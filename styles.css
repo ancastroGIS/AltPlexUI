@@ -267,6 +267,43 @@ button { font-family: inherit; cursor: pointer; }
 }
 .progress-fill { display: block; height: 100%; background: var(--resume); }
 
+/* ---------- pin / oauth waiting ---------- */
+@keyframes lumen-spin {
+  to { transform: rotate(360deg); }
+}
+.pin-waiting { text-align: center; padding: 0.25rem 0; }
+.pin-spinner {
+  width: 32px;
+  height: 32px;
+  border: 2.5px solid var(--surface-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: lumen-spin 0.75s linear infinite;
+  margin: 0 auto 1.2rem;
+}
+.pin-message {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  margin: 0 0 1.2rem;
+}
+.pin-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 0.3rem;
+}
+.pin-code {
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: var(--text);
+  margin: 0 0 1.4rem;
+}
+
 /* ---------- auth tabs ---------- */
 .auth-tabs {
   display: flex;

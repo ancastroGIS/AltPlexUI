@@ -1,5 +1,5 @@
 // src/components.tsx
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, createEffect } from "solid-js";
 import type { Hub, Item, Section } from "./plex";
 import { poster, backdrop, progress } from "./media";
 import {
@@ -138,15 +138,27 @@ export function Row(props: { hub: Hub }) {
 export function Setup(props: {
   onConnect: (token: string) => void;
   onSignIn: (username: string, password: string) => void;
+  onStartPin: () => void;
+  onCancelPin: () => void;
   onDemo: () => void;
   error?: string;
   busy?: boolean;
+  pinMode: boolean;
+  pinCode?: string;
+  pinAuthUrl?: string;
 }) {
   const [mode, setMode] = createSignal<"login" | "token">("login");
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [token, setTokenInput] = createSignal("");
   let passEl: HTMLInputElement | undefined;
+
+  // Auto-open the Plex auth popup whenever the PIN flow starts.
+  createEffect(() => {
+    if (props.pinMode && props.pinAuthUrl) {
+      window.open(props.pinAuthUrl, "plexauth", "width=800,height=700,left=200,top=100");
+    }
+  });
 
   const submit = () =>
     mode() === "login"
@@ -164,88 +176,120 @@ export function Setup(props: {
           Lumen
         </div>
 
-        <div class="auth-tabs">
+        {/* PIN waiting state — replaces the form entirely */}
+        <Show when={props.pinMode}>
+          <div class="pin-waiting">
+            <div class="pin-spinner" />
+            <p class="pin-message">
+              Complete sign-in in the Plex window.<br />
+              This page will update automatically.
+            </p>
+            <p class="pin-label">Auth code</p>
+            <p class="pin-code">{props.pinCode}</p>
+            <button
+              class="btn btn-ghost wide"
+              onClick={() =>
+                props.pinAuthUrl &&
+                window.open(props.pinAuthUrl, "plexauth", "width=800,height=700,left=200,top=100")
+              }
+            >
+              Open sign-in window again
+            </button>
+            <button class="link" onClick={props.onCancelPin}>Cancel</button>
+          </div>
+        </Show>
+
+        {/* Normal auth UI */}
+        <Show when={!props.pinMode}>
+          <div class="auth-tabs">
+            <button
+              class="auth-tab"
+              classList={{ active: mode() === "login" }}
+              onClick={() => setMode("login")}
+            >
+              Sign In
+            </button>
+            <button
+              class="auth-tab"
+              classList={{ active: mode() === "token" }}
+              onClick={() => setMode("token")}
+            >
+              Token
+            </button>
+          </div>
+
+          <Show when={mode() === "login"}>
+            <input
+              class="field"
+              type="text"
+              placeholder="Email or username"
+              autocomplete="username"
+              value={username()}
+              onInput={(e) => setUsername(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && passEl?.focus()}
+            />
+            <input
+              ref={(el) => (passEl = el)}
+              class="field"
+              type="password"
+              placeholder="Password"
+              autocomplete="current-password"
+              value={password()}
+              onInput={(e) => setPassword(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
+            />
+          </Show>
+
+          <Show when={mode() === "token"}>
+            <input
+              class="field"
+              type="password"
+              placeholder="Plex token"
+              value={token()}
+              onInput={(e) => setTokenInput(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
+            />
+          </Show>
+
+          <Show when={props.error}>
+            <p class="field-error">{props.error}</p>
+          </Show>
+
           <button
-            class="auth-tab"
-            classList={{ active: mode() === "login" }}
-            onClick={() => setMode("login")}
+            class="btn btn-primary wide"
+            disabled={!canSubmit()}
+            onClick={submit}
           >
-            Sign In
+            {props.busy
+              ? "Connecting…"
+              : mode() === "login"
+              ? "Sign In"
+              : "Connect"}
           </button>
-          <button
-            class="auth-tab"
-            classList={{ active: mode() === "token" }}
-            onClick={() => setMode("token")}
-          >
-            Token
+
+          <Show when={mode() === "login"}>
+            <button class="link" style={{ "margin-top": "0.75rem" }} onClick={props.onStartPin}>
+              Sign in with Plex instead ↗
+            </button>
+          </Show>
+
+          <button class="link" onClick={props.onDemo}>
+            Explore the demo instead
           </button>
-        </div>
 
-        <Show when={mode() === "login"}>
-          <input
-            class="field"
-            type="text"
-            placeholder="Email or username"
-            autocomplete="username"
-            value={username()}
-            onInput={(e) => setUsername(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && passEl?.focus()}
-          />
-          <input
-            ref={(el) => (passEl = el)}
-            class="field"
-            type="password"
-            placeholder="Password"
-            autocomplete="current-password"
-            value={password()}
-            onInput={(e) => setPassword(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
-          />
-        </Show>
+          <Show when={mode() === "login"}>
+            <p class="setup-hint">
+              Your password is never stored — only the resulting session token is saved locally.
+              If you have 2FA enabled, sign in with Plex above or use the Token tab.
+            </p>
+          </Show>
 
-        <Show when={mode() === "token"}>
-          <input
-            class="field"
-            type="password"
-            placeholder="Plex token"
-            value={token()}
-            onInput={(e) => setTokenInput(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && canSubmit() && submit()}
-          />
-        </Show>
-
-        <Show when={props.error}>
-          <p class="field-error">{props.error}</p>
-        </Show>
-
-        <button
-          class="btn btn-primary wide"
-          disabled={!canSubmit()}
-          onClick={submit}
-        >
-          {props.busy
-            ? "Connecting…"
-            : mode() === "login"
-            ? "Sign In"
-            : "Connect"}
-        </button>
-
-        <button class="link" onClick={props.onDemo}>
-          Explore the demo instead
-        </button>
-
-        <Show when={mode() === "login"}>
-          <p class="setup-hint">
-            Your password is never stored — only the resulting session token is saved locally.
-            If you have two-factor authentication enabled, use the Token tab instead.
-          </p>
-        </Show>
-
-        <Show when={mode() === "token"}>
-          <p class="setup-hint">
-            Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
-            then copy <code>X-Plex-Token</code> from the address bar.
-          </p>
+          <Show when={mode() === "token"}>
+            <p class="setup-hint">
+              Find your token in Plex Web: open any item → ⋯ → Get Info → View XML,
+              then copy <code>X-Plex-Token</code> from the address bar.
+            </p>
+          </Show>
         </Show>
       </div>
     </div>
