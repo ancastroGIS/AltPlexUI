@@ -14,10 +14,22 @@ export function clearToken() {
   localStorage.removeItem(LS_TOKEN);
 }
 
+function uuid(): string {
+  // crypto.randomUUID() requires a secure context (HTTPS / localhost).
+  // Fall back to a manual v4 UUID so plain-HTTP deployments still work.
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 export function getClientId(): string {
   let id = localStorage.getItem(LS_CLIENT_ID);
   if (!id) {
-    id = crypto.randomUUID();
+    id = uuid();
     localStorage.setItem(LS_CLIENT_ID, id);
   }
   return id;

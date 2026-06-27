@@ -14,6 +14,14 @@ export default defineConfig({
         secure: false,
         rewrite: (p) => p.replace(/^\/plex/, ""),
       },
+      // Proxies Plex.tv API calls (sign-in, PIN auth) — mirrors the nginx
+      // /plextv/ location so dev and production behave identically.
+      "/plextv": {
+        target: "https://plex.tv",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (p) => p.replace(/^\/plextv/, ""),
+      },
     },
   },
 });
