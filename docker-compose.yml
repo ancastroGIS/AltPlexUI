@@ -1,10 +1,278 @@
-services:
+# docker-compose.yml — Lumen + full arr stack
+# ─────────────────────────────────────────────
+# 1. Copy .env.example to .env and fill in every value
+# 2. Place your WireGuard config in ./vpn/wg0.conf
+# 3. Place your Zurg config.yml and rclone.conf in ./zurg/
+# 4. docker compose up -d --build
+
+networks:
+  # All services communicate on this network.
+  # Lumen's nginx proxies arr APIs so the browser never touches API keys.
   lumen:
-    build: .
+    driver: bridge
+
+volumes:
+  zurgdata:
+
+services:
+
+  # ═══════════════════════════════════════════════════════════
+  #  LUMEN
+  # ═══════════════════════════════════════════════════════════
+  lumen:
+    build:
+      context: ./lumen
     container_name: lumen
-    ports:
-      - "7070:70"
-    environment:
-      # Point this at your Plex Media Server (reachable from the container).
-      - PLEX_SERVER_URL=http://192.168.1.50:32400
     restart: unless-stopped
+    networks:
+      - lumen
+    ports:
+      - "${LUMEN_PORT:-7070}:70"
+    environment:
+      - PLEX_SERVER_URL=${PLEX_SERVER_URL}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      - LIDARR_API_KEY=${LIDARR_API_KEY:-}
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+    depends_on:
+      - radarr
+      - sonarr
+
+  # ═══════════════════════════════════════════════════════════
+  #  VPN — WireGuard (ProtonVPN)
+  #
+  #  qBittorrent and NZBGet share this container's network
+  #  stack via network_mode: service:vpn, so ALL their traffic
+  #  exits through the VPN tunnel.
+  #
+  #  Their WebUI ports are exposed HERE on the VPN container,
+  #  not on the download client containers. Radarr/Sonarr
+  #  reach them at vpn:8080 (qBit) and vpn:6789 (NZBGet)
+  #  on the lumen network.
+  # ═══════════════════════════════════════════════════════════
+  vpn:
+    image: lscr.io/linuxserver/wireguard:latest
+    container_name: vpn
+    restart: unless-stopped
+    networks:
+      - lumen
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ./vpn:/config
+      - /lib/modules:/lib/modules
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    ports:
+      - "8080:8080"       # qBittorrent WebUI
+      - "6789:6789"       # NZBGet WebUI
+      - "6881:6881"       # qBittorrent torrent (TCP)
+      - "6881:6881/udp"   # qBittorrent torrent (UDP)
+
+  # ═══════════════════════════════════════════════════════════
+  #  QBITTORRENT — routes all traffic through VPN
+  # ═══════════════════════════════════════════════════════════
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    network_mode: "service:vpn"
+    depends_on:
+      - vpn
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/qbittorrent/appdata:/config
+      - ${DOWNLOADS_PATH}:/downloads
+
+  # ═══════════════════════════════════════════════════════════
+  #  NZBGET — routes all traffic through VPN
+  # ═══════════════════════════════════════════════════════════
+  nzbget:
+    image: lscr.io/linuxserver/nzbget:latest
+    container_name: nzbget
+    restart: unless-stopped
+    network_mode: "service:vpn"
+    depends_on:
+      - vpn
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/nzbget/config:/config
+      - ${DOWNLOADS_PATH}:/downloads
+      - ${WATCHLIST_PATH}:/watchlistarr:rshared
+
+  # ═══════════════════════════════════════════════════════════
+  #  FLARESOLVERR — Cloudflare bypass for Prowlarr indexers
+  # ═══════════════════════════════════════════════════════════
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    networks:
+      - lumen
+    environment:
+      - LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
+      - TZ=${TZ:-Etc/UTC}
+
+  # ═══════════════════════════════════════════════════════════
+  #  PROWLARR — indexer manager (connects to Flaresolverr)
+  # ═══════════════════════════════════════════════════════════
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    networks:
+      - lumen
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/prowlarr/data:/config
+
+  # ═══════════════════════════════════════════════════════════
+  #  RADARR — movie management
+  #  In Radarr settings, set download clients to:
+  #    qBittorrent: host=vpn  port=8080
+  #    NZBGet:      host=vpn  port=6789
+  # ═══════════════════════════════════════════════════════════
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    networks:
+      - lumen
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/radarr/data:/config
+      - ${MOVIES_PATH}:/movies
+      - ${DOWNLOADS_PATH}:/downloads
+      - ${MEDIA_BASE}:/all:rshared
+      - /mnt/zurg/__all__:/mnt/zurg/__all__:ro
+
+  # ═══════════════════════════════════════════════════════════
+  #  SONARR — TV show management
+  #  In Sonarr settings, set download clients to:
+  #    qBittorrent: host=vpn  port=8080
+  #    NZBGet:      host=vpn  port=6789
+  # ═══════════════════════════════════════════════════════════
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    networks:
+      - lumen
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/sonarr/data:/config
+      - ${MEDIA_BASE}:/all:rshared
+      - ${DOWNLOADS_PATH}:/downloads:rshared
+      - ${SYMLINKS_PATH}:/symLinks:rshared
+      - /mnt/zurg/__all__:/mnt/zurg/__all__
+
+  # ═══════════════════════════════════════════════════════════
+  #  LIDARR — music management
+  # ═══════════════════════════════════════════════════════════
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    networks:
+      - lumen
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    volumes:
+      - ${ARR_CONFIG:-/opt/arrStack}/lidarr/data:/config
+      - ${MUSIC_PATH}:/music
+      - ${DOWNLOADS_PATH}:/downloads:rshared
+      - ${MEDIA_BASE}:/all:rshared
+      - /mnt/zurg/__all__:/mnt/zurg/__all__:ro
+
+  # ═══════════════════════════════════════════════════════════
+  #  DECYPHARR — Real-Debrid blackhole download client for arr
+  # ═══════════════════════════════════════════════════════════
+  decypharr:
+    image: cy01/blackhole:latest
+    container_name: decypharr
+    restart: unless-stopped
+    networks:
+      - lumen
+    volumes:
+      - /mnt:/mnt:rshared
+      - ${DOWNLOADS_PATH}:/downloads:rshared
+      - ${MEDIA_BASE}:/all:rshared
+      - ./decypharr:/app
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+
+  # ═══════════════════════════════════════════════════════════
+  #  ZURG — Real-Debrid WebDAV server
+  # ═══════════════════════════════════════════════════════════
+  zurg:
+    image: ghcr.io/debridmediamanager/zurg-testing:latest
+    container_name: zurg
+    restart: unless-stopped
+    networks:
+      - lumen
+    volumes:
+      - ./zurg/plex_update.sh:/app/plex_update.sh
+      - ./zurg/config.yml:/app/config.yml
+      - zurgdata:/app/data
+
+  # ═══════════════════════════════════════════════════════════
+  #  RCLONE — mounts Zurg WebDAV as a FUSE filesystem
+  #  Host path /mnt/zurg is shared into Radarr/Sonarr/Lidarr
+  #  via the bind mounts above. The rshared propagation flag
+  #  makes the FUSE mount visible to sibling containers.
+  # ═══════════════════════════════════════════════════════════
+  rclone:
+    image: rclone/rclone:latest
+    container_name: rclone
+    restart: unless-stopped
+    depends_on:
+      - zurg
+    environment:
+      - TZ=${TZ:-Etc/UTC}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    volumes:
+      - /mnt/zurg:/data:rshared
+      - ./zurg/rclone.conf:/config/rclone/rclone.conf
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    command: >
+      mount zurg: /data
+      --allow-other
+      --allow-non-empty
+      --vfs-cache-mode full
+      --dir-cache-time 120s
+      --vfs-cache-max-age 5m
+      --cache-db-purge

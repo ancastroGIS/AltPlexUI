@@ -1,0 +1,21 @@
+# Environment — contains API keys and secrets
+.env
+
+# WireGuard config contains private keys
+vpn/
+
+# Zurg runtime config (contains RD API key)
+zurg/config.yml
+zurg/rclone.conf
+
+# Decypharr app config (contains RD API key)
+decypharr/
+
+# Node / build artifacts
+node_modules/
+lumen/node_modules/
+lumen/dist/
+
+# OS
+.DS_Store
+Thumbs.db

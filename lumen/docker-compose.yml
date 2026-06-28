@@ -3,8 +3,7 @@ services:
     build: .
     container_name: lumen
     ports:
-      - "7070:70"
+      - "${LUMEN_PORT:-7070}:70"
     environment:
-      # Point this at your Plex Media Server (reachable from the container).
-      - PLEX_SERVER_URL=http://192.168.1.50:32400
+      - PLEX_SERVER_URL=${PLEX_SERVER_URL:-http://192.168.1.50:32400}
     restart: unless-stopped

@@ -47,6 +47,51 @@ server {
         proxy_set_header Connection "";
     }
 
+    # ── Arr API proxies ───────────────────────────────────────────────────
+    # API keys are injected here by nginx so the browser never sees them.
+    # Routes are /radarr/, /sonarr/, /lidarr/, /prowlarr/ — each strips its
+    # own prefix before forwarding to the service on the lumen Docker network.
+
+    location /radarr/ {
+        proxy_pass http://radarr:7878/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Api-Key ${RADARR_API_KEY};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+    }
+
+    location /sonarr/ {
+        proxy_pass http://sonarr:8989/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Api-Key ${SONARR_API_KEY};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+    }
+
+    location /lidarr/ {
+        proxy_pass http://lidarr:8686/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Api-Key ${LIDARR_API_KEY};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+    }
+
+    location /prowlarr/ {
+        proxy_pass http://prowlarr:9696/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Api-Key ${PROWLARR_API_KEY};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Connection "";
+    }
+
     # SPA: serve the file if it exists, otherwise fall back to index.html.
     location / {
         try_files $uri $uri/ /index.html;
