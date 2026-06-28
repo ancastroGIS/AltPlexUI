@@ -135,6 +135,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "9696:9696"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -154,6 +156,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "7878:7878"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -177,6 +181,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "8989:8989"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -197,6 +203,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "8686:8686"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
