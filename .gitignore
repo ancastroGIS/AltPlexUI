@@ -1,15 +1,9 @@
-# Environment — contains API keys and secrets
+# Environment — contains API keys, never commit the filled-in version
 .env
 
-# WireGuard config contains private keys
-vpn/
-
-# Zurg runtime config (contains RD API key)
-zurg/config.yml
-zurg/rclone.conf
-
-# Decypharr app config (contains RD API key)
-decypharr/
+# WireGuard configs contain your private key — gitignored intentionally.
+# See vpn/README.md for setup instructions.
+vpn/*.conf
 
 # Node / build artifacts
 node_modules/
