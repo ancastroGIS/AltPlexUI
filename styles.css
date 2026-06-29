@@ -1215,20 +1215,37 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* Add / status badges */
+.disc-add-btns {
+  display: flex;
+  gap: 0.35rem;
+}
 .disc-add-btn {
   border: 1px solid rgba(255,255,255,0.25);
   background: rgba(255,255,255,0.12);
   backdrop-filter: blur(8px);
   color: var(--text);
-  font-size: 0.78rem;
-  font-weight: 600;
-  padding: 0.3rem 0.8rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.28rem 0.6rem;
   border-radius: 20px;
   transition: background 0.15s, border-color 0.15s;
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
-.disc-add-btn:hover { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.5); }
-.disc-add-btn--err { border-color: #c0392b; color: #e74c3c; }
+/* ▶ Watch — accent blue, implies instant/RD */
+.disc-add-btn--watch {
+  background: rgba(52, 152, 219, 0.35);
+  border-color: rgba(52, 152, 219, 0.7);
+  color: #fff;
+}
+.disc-add-btn--watch:hover { background: rgba(52, 152, 219, 0.6); border-color: #3498db; }
+/* ⬇ 4K — neutral, implies download/queue */
+.disc-add-btn--dl {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.3);
+}
+.disc-add-btn--dl:hover { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.6); }
+.disc-add-btn--err { border-color: #c0392b; color: #e74c3c; background: rgba(192,57,43,0.2); }
 
 .disc-badge {
   display: inline-block;

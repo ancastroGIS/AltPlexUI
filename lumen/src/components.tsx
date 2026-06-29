@@ -912,7 +912,9 @@ export function DiscoverView(props: { onClose: () => void }) {
   const [query, setQuery] = createSignal("");
   const [debouncedQuery, setDebouncedQuery] = createSignal("");
   const [tab, setTab] = createSignal<"movie" | "show">("movie");
-  const [addStates, setAddStates] = createSignal<Record<string, "adding" | "added" | "error">>({});
+  type AddMode = "watch" | "download";
+  type AddStatus = "adding" | "added" | "error";
+  const [addStates, setAddStates] = createSignal<Record<string, { mode: AddMode; status: AddStatus }>>({});
 
   // ── Device profile (persisted in localStorage) ─────────────────────────
   const [profileId, setProfileId] = createSignal(getDeviceProfile().id);
@@ -1001,27 +1003,43 @@ export function DiscoverView(props: { onClose: () => void }) {
     return <span class={`rd-badge ${cls}`}>{label}</span>;
   }
 
-  async function handleAdd(item: ArrMovie | ArrSeries, type: "movie" | "show") {
+  // Pick the quality profile that best matches the desired mode.
+  // "watch" → HD-1080p (RD instant, Decypharr); "download" → highest quality (4K torrent/usenet).
+  function pickProfile(profiles: QualityProfile[], mode: AddMode): QualityProfile {
+    if (mode === "download") {
+      return (
+        profiles.find((p) => /4k|ultra|2160|uhd/i.test(p.name)) ??
+        profiles[profiles.length - 1]
+      );
+    }
+    return (
+      profiles.find((p) => /1080/i.test(p.name) && !/4k|ultra|2160|uhd/i.test(p.name)) ??
+      profiles.find((p) => /hd|high/i.test(p.name)) ??
+      profiles[0]
+    );
+  }
+
+  async function handleAdd(item: ArrMovie | ArrSeries, type: "movie" | "show", mode: AddMode) {
     const key = type === "movie"
       ? `m-${(item as ArrMovie).tmdbId}`
       : `s-${(item as ArrSeries).tvdbId}`;
-    setAddStates((p) => ({ ...p, [key]: "adding" }));
+    setAddStates((p) => ({ ...p, [key]: { mode, status: "adding" } }));
     try {
       if (type === "movie") {
         const cfg = radarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Radarr not configured");
-        await addMovie(item as ArrMovie, cfg.profiles[0].id, cfg.folders[0].path);
+        await addMovie(item as ArrMovie, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path);
       } else {
         const cfg = sonarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Sonarr not configured");
-        await addSeries(item as ArrSeries, cfg.profiles[0].id, cfg.folders[0].path);
+        await addSeries(item as ArrSeries, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path);
       }
-      setAddStates((p) => ({ ...p, [key]: "added" }));
+      setAddStates((p) => ({ ...p, [key]: { mode, status: "added" } }));
     } catch (err) {
       console.error(err);
-      setAddStates((p) => ({ ...p, [key]: "error" }));
+      setAddStates((p) => ({ ...p, [key]: { mode, status: "error" } }));
     }
   }
 
@@ -1042,21 +1060,39 @@ export function DiscoverView(props: { onClose: () => void }) {
         <Match when={monitored()}>
           <span class="disc-badge disc-badge--mon">Monitored</span>
         </Match>
-        <Match when={st() === "adding"}>
+        <Match when={st()?.status === "adding"}>
           <span class="disc-badge disc-badge--adding">Adding…</span>
         </Match>
-        <Match when={st() === "added"}>
-          <span class="disc-badge disc-badge--added">Queued ✓</span>
+        <Match when={st()?.status === "added"}>
+          <span class="disc-badge disc-badge--added">
+            {st()!.mode === "watch" ? "▶ Queued" : "⬇ Queued"}
+          </span>
         </Match>
-        <Match when={st() === "error"}>
-          <button class="disc-add-btn disc-add-btn--err" onClick={() => handleAdd(cProps.item, cProps.type)}>
-            Retry
-          </button>
+        <Match when={st()?.status === "error"}>
+          <div class="disc-add-btns">
+            <button class="disc-add-btn disc-add-btn--watch disc-add-btn--err"
+              onClick={() => handleAdd(cProps.item, cProps.type, st()!.mode)}>
+              Retry
+            </button>
+          </div>
         </Match>
         <Match when={true}>
-          <button class="disc-add-btn" onClick={() => handleAdd(cProps.item, cProps.type)}>
-            + Add
-          </button>
+          <div class="disc-add-btns">
+            <button
+              class="disc-add-btn disc-add-btn--watch"
+              title="Instant watch via Real-Debrid — HD 1080p, no wait"
+              onClick={() => handleAdd(cProps.item, cProps.type, "watch")}
+            >
+              ▶ Watch
+            </button>
+            <button
+              class="disc-add-btn disc-add-btn--dl"
+              title="Download via arr — best quality up to 4K"
+              onClick={() => handleAdd(cProps.item, cProps.type, "download")}
+            >
+              ⬇ 4K
+            </button>
+          </div>
         </Match>
       </Switch>
     );
