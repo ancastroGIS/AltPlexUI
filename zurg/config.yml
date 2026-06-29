@@ -2,7 +2,7 @@ zurg: v1
 # Get your token from https://real-debrid.com/apitoken
 token: YOUR_REAL_DEBRID_API_KEY
 
-host: [::]
+host: "[::]"
 port: 9999
 concurrent_workers: 20
 check_for_changes_every_secs: 10
