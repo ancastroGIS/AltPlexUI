@@ -123,6 +123,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "8191:8191"
     environment:
       - LOG_LEVEL=${FLARESOLVERR_LOG_LEVEL:-info}
       - TZ=${TZ:-Etc/UTC}
@@ -226,6 +228,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "8282:8282"
     volumes:
       - /mnt:/mnt:rshared
       - ${DOWNLOADS_PATH}:/downloads:rshared
