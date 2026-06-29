@@ -7,7 +7,7 @@ import {
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView, InfoView } from "./components";
+import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
 import {
   status, setStatus,
   demo, setDemo,
@@ -18,11 +18,12 @@ import {
 
 // ── Navigation layer types ─────────────────────────────────────────────────
 
-type PlayerLayer  = { kind: "player";  item: Item };
-type LibraryLayer = { kind: "library"; sectionKey: string; title: string; sectionType: string };
-type DetailLayer  = { kind: "detail";  item: Item };
-type InfoLayer    = { kind: "info";    item: Item };
-type NavLayer = PlayerLayer | LibraryLayer | DetailLayer | InfoLayer;
+type PlayerLayer   = { kind: "player";   item: Item };
+type LibraryLayer  = { kind: "library";  sectionKey: string; title: string; sectionType: string };
+type DetailLayer   = { kind: "detail";   item: Item };
+type InfoLayer     = { kind: "info";     item: Item };
+type DiscoverLayer = { kind: "discover" };
+type NavLayer = PlayerLayer | LibraryLayer | DetailLayer | InfoLayer | DiscoverLayer;
 
 // ── App ────────────────────────────────────────────────────────────────────
 
@@ -33,10 +34,11 @@ export function App() {
 
   // Typed accessors for the top navigation layer
   const topLayer    = () => { const s = navStack(); return s[s.length - 1] ?? null; };
-  const playerLayer = (): PlayerLayer  | null => { const l = topLayer(); return l?.kind === "player"  ? l : null; };
-  const libraryLayer= (): LibraryLayer | null => { const l = topLayer(); return l?.kind === "library" ? l : null; };
-  const detailLayer = (): DetailLayer  | null => { const l = topLayer(); return l?.kind === "detail"  ? l : null; };
-  const infoLayer   = (): InfoLayer    | null => { const l = topLayer(); return l?.kind === "info"    ? l : null; };
+  const playerLayer   = (): PlayerLayer   | null => { const l = topLayer(); return l?.kind === "player"   ? l : null; };
+  const libraryLayer  = (): LibraryLayer  | null => { const l = topLayer(); return l?.kind === "library"  ? l : null; };
+  const detailLayer   = (): DetailLayer   | null => { const l = topLayer(); return l?.kind === "detail"   ? l : null; };
+  const infoLayer     = (): InfoLayer     | null => { const l = topLayer(); return l?.kind === "info"     ? l : null; };
+  const discoverLayer = (): DiscoverLayer | null => { const l = topLayer(); return l?.kind === "discover" ? l : null; };
 
   onMount(() => {
     // Seed the history so the first back button pops our layers, not the browser tab
@@ -221,7 +223,12 @@ export function App() {
     >
       {/* ── Base view (always mounted, overlays appear on top) ─────────── */}
       <div class="app">
-        <TopBar sections={sections()} onSignOut={handleSignOut} onBrowseAll={openLibrary} />
+        <TopBar
+          sections={sections()}
+          onSignOut={handleSignOut}
+          onBrowseAll={openLibrary}
+          onDiscover={() => pushLayer({ kind: "discover" })}
+        />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           <Show when={home()} keyed>
             {(data) => (
@@ -245,6 +252,9 @@ export function App() {
 
       {/* ── Overlay layers (only the topmost renders) ─────────────────── */}
       <Switch>
+        <Match when={discoverLayer()}>
+          <DiscoverView onClose={goBack} />
+        </Match>
         <Match when={libraryLayer()}>
           {(l) => (
             <LibraryGrid

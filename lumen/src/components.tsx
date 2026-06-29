@@ -1,11 +1,16 @@
 // src/components.tsx
-import { For, Show, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
   buildHlsUrl, newSessionId, stopTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
+import {
+  searchMovies, searchSeries, addMovie, addSeries, arrPoster,
+  getRadarrProfiles, getRadarrRootFolders, getSonarrProfiles, getSonarrRootFolders,
+  type ArrMovie, type ArrSeries,
+} from "./arr";
 import { poster, backdrop, progress } from "./media";
 import { activeSection, setActiveSection, serverName, demo } from "./store";
 
@@ -59,6 +64,7 @@ export function TopBar(props: {
   sections: Section[];
   onSignOut: () => void;
   onBrowseAll: (section: Section) => void;
+  onDiscover: () => void;
 }) {
   return (
     <header class="topbar">
@@ -103,6 +109,9 @@ export function TopBar(props: {
             </Show>
           )}
         </For>
+        <button class="discover-trigger" onClick={props.onDiscover} title="Add media">
+          + Add Media
+        </button>
         <button class="sign-out" onClick={props.onSignOut}>Sign out</button>
       </div>
     </header>
@@ -883,6 +892,219 @@ export function InfoView(props: {
             <h2 class="info-section-label">Country</h2>
             <p class="info-crew-names">{details()?.Country?.map(c => c.tag).join(", ")}</p>
           </section>
+        </Show>
+      </div>
+    </div>
+  );
+}
+
+// ── DiscoverView ───────────────────────────────────────────────────────────
+
+export function DiscoverView(props: { onClose: () => void }) {
+  const [query, setQuery] = createSignal("");
+  const [debouncedQuery, setDebouncedQuery] = createSignal("");
+  const [tab, setTab] = createSignal<"movie" | "show">("movie");
+  const [addStates, setAddStates] = createSignal<Record<string, "adding" | "added" | "error">>({});
+
+  // Debounce search input by 400 ms
+  createEffect(() => {
+    const q = query();
+    if (!q) { setDebouncedQuery(""); return; }
+    const t = setTimeout(() => setDebouncedQuery(q), 400);
+    onCleanup(() => clearTimeout(t));
+  });
+
+  const [movieResults] = createResource(
+    () => (tab() === "movie" ? debouncedQuery() : null) || null,
+    searchMovies
+  );
+  const [showResults] = createResource(
+    () => (tab() === "show" ? debouncedQuery() : null) || null,
+    searchSeries
+  );
+
+  // Fetch arr config once on mount so the first "Add" click is instant
+  const [radarrCfg] = createResource(() =>
+    Promise.all([getRadarrProfiles(), getRadarrRootFolders()])
+      .then(([profiles, folders]) => ({ profiles, folders }))
+  );
+  const [sonarrCfg] = createResource(() =>
+    Promise.all([getSonarrProfiles(), getSonarrRootFolders()])
+      .then(([profiles, folders]) => ({ profiles, folders }))
+  );
+
+  async function handleAdd(item: ArrMovie | ArrSeries, type: "movie" | "show") {
+    const key = type === "movie"
+      ? `m-${(item as ArrMovie).tmdbId}`
+      : `s-${(item as ArrSeries).tvdbId}`;
+    setAddStates((p) => ({ ...p, [key]: "adding" }));
+    try {
+      if (type === "movie") {
+        const cfg = radarrCfg();
+        if (!cfg?.profiles.length || !cfg?.folders.length)
+          throw new Error("Radarr not configured");
+        await addMovie(item as ArrMovie, cfg.profiles[0].id, cfg.folders[0].path);
+      } else {
+        const cfg = sonarrCfg();
+        if (!cfg?.profiles.length || !cfg?.folders.length)
+          throw new Error("Sonarr not configured");
+        await addSeries(item as ArrSeries, cfg.profiles[0].id, cfg.folders[0].path);
+      }
+      setAddStates((p) => ({ ...p, [key]: "added" }));
+    } catch (err) {
+      console.error(err);
+      setAddStates((p) => ({ ...p, [key]: "error" }));
+    }
+  }
+
+  function CardAction(cProps: { item: ArrMovie | ArrSeries; type: "movie" | "show" }) {
+    const key = () =>
+      cProps.type === "movie"
+        ? `m-${(cProps.item as ArrMovie).tmdbId}`
+        : `s-${(cProps.item as ArrSeries).tvdbId}`;
+    const st = () => addStates()[key()];
+    const hasFile = () => (cProps.item as ArrMovie).hasFile;
+    const inLib = () => cProps.item.id > 0 && hasFile();
+    const monitored = () => cProps.item.id > 0 && !hasFile();
+    return (
+      <Switch>
+        <Match when={inLib()}>
+          <span class="disc-badge disc-badge--lib">In Library</span>
+        </Match>
+        <Match when={monitored()}>
+          <span class="disc-badge disc-badge--mon">Monitored</span>
+        </Match>
+        <Match when={st() === "adding"}>
+          <span class="disc-badge disc-badge--adding">Adding…</span>
+        </Match>
+        <Match when={st() === "added"}>
+          <span class="disc-badge disc-badge--added">Queued ✓</span>
+        </Match>
+        <Match when={st() === "error"}>
+          <button class="disc-add-btn disc-add-btn--err" onClick={() => handleAdd(cProps.item, cProps.type)}>
+            Retry
+          </button>
+        </Match>
+        <Match when={true}>
+          <button class="disc-add-btn" onClick={() => handleAdd(cProps.item, cProps.type)}>
+            + Add
+          </button>
+        </Match>
+      </Switch>
+    );
+  }
+
+  function ResultGrid<T extends ArrMovie | ArrSeries>(gProps: {
+    items: T[] | undefined;
+    type: "movie" | "show";
+    error: unknown;
+    loading: boolean;
+    service: string;
+  }) {
+    return (
+      <>
+        <Show when={gProps.loading}>
+          <div class="loading">Searching…</div>
+        </Show>
+        <Show when={gProps.error && !gProps.loading}>
+          <div class="discover-msg">
+            {gProps.service} unavailable — add API key to .env and restart Lumen.
+          </div>
+        </Show>
+        <Show when={gProps.items && !gProps.loading}>
+          <Show when={gProps.items!.length === 0}>
+            <div class="discover-msg">No results found.</div>
+          </Show>
+          <div class="discover-grid">
+            <For each={gProps.items}>
+              {(item) => {
+                const posterUrl = arrPoster(item.images);
+                const subtitle = gProps.type === "show"
+                  ? `${item.year}${(item as ArrSeries).status === "continuing" ? "  ·  Ongoing" : ""}`
+                  : String(item.year || "");
+                return (
+                  <div class="discover-card">
+                    <div class="discover-poster">
+                      <Show
+                        when={posterUrl}
+                        fallback={<div class="discover-poster-ph">{item.title[0]}</div>}
+                      >
+                        <img src={posterUrl} alt={item.title} loading="lazy" />
+                      </Show>
+                      <div class="discover-card-action">
+                        <CardAction item={item} type={gProps.type} />
+                      </div>
+                    </div>
+                    <div class="discover-card-meta">
+                      <p class="discover-card-title">{item.title}</p>
+                      <p class="discover-card-year">{subtitle}</p>
+                    </div>
+                  </div>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
+      </>
+    );
+  }
+
+  return (
+    <div class="discover-view">
+      <div class="discover-header">
+        <button class="discover-close" onClick={props.onClose} aria-label="Close">✕</button>
+        <input
+          class="discover-input"
+          type="search"
+          placeholder="Search movies and shows…"
+          value={query()}
+          onInput={(e) => setQuery(e.currentTarget.value)}
+          autofocus
+        />
+        <div class="discover-tabs">
+          <button
+            class="discover-tab"
+            classList={{ active: tab() === "movie" }}
+            onClick={() => setTab("movie")}
+          >
+            Movies
+          </button>
+          <button
+            class="discover-tab"
+            classList={{ active: tab() === "show" }}
+            onClick={() => setTab("show")}
+          >
+            Shows
+          </button>
+        </div>
+      </div>
+
+      <div class="discover-body">
+        <Show when={!debouncedQuery()}>
+          <div class="discover-msg discover-msg--empty">
+            <p>Search for content to add to your library.</p>
+            <p>Results come from Radarr (movies) and Sonarr (shows) via TMDB / TVDB.</p>
+          </div>
+        </Show>
+
+        <Show when={tab() === "movie" && !!debouncedQuery()}>
+          <ResultGrid
+            items={movieResults()}
+            type="movie"
+            error={movieResults.error}
+            loading={movieResults.loading}
+            service="Radarr"
+          />
+        </Show>
+
+        <Show when={tab() === "show" && !!debouncedQuery()}>
+          <ResultGrid
+            items={showResults()}
+            type="show"
+            error={showResults.error}
+            loading={showResults.loading}
+            service="Sonarr"
+          />
         </Show>
       </div>
     </div>
