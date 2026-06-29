@@ -9,6 +9,7 @@ import {
 import {
   searchMovies, searchSeries, addMovie, addSeries, arrPoster,
   getRadarrProfiles, getRadarrRootFolders, getSonarrProfiles, getSonarrRootFolders,
+  ensureRadarrTag, ensureSonarrTag,
   searchProwlarr, type ArrMovie, type ArrSeries, type ProwlarrRelease,
 } from "./arr";
 import {
@@ -71,7 +72,6 @@ export function fmt(s: number): string {
 export function TopBar(props: {
   sections: Section[];
   onSignOut: () => void;
-  onBrowseAll: (section: Section) => void;
   onDiscover: () => void;
 }) {
   return (
@@ -107,16 +107,6 @@ export function TopBar(props: {
         <Show when={serverName()}>
           <span class="server">{serverName()}</span>
         </Show>
-        {/* Browse-all buttons for each section */}
-        <For each={props.sections}>
-          {(s) => (
-            <Show when={activeSection() === s.key}>
-              <button class="browse-all-btn" onClick={() => props.onBrowseAll(s)}>
-                Browse all {s.title} →
-              </button>
-            </Show>
-          )}
-        </For>
         <button class="discover-trigger" onClick={props.onDiscover} title="Add media">
           + Add Media
         </button>
@@ -912,7 +902,7 @@ export function DiscoverView(props: { onClose: () => void }) {
   const [query, setQuery] = createSignal("");
   const [debouncedQuery, setDebouncedQuery] = createSignal("");
   const [tab, setTab] = createSignal<"movie" | "show">("movie");
-  type AddMode = "watch" | "download";
+  type AddMode = "down" | "sym";
   type AddStatus = "adding" | "added" | "error";
   const [addStates, setAddStates] = createSignal<Record<string, { mode: AddMode; status: AddStatus }>>({});
 
@@ -1003,10 +993,9 @@ export function DiscoverView(props: { onClose: () => void }) {
     return <span class={`rd-badge ${cls}`}>{label}</span>;
   }
 
-  // Pick the quality profile that best matches the desired mode.
-  // "watch" → HD-1080p (RD instant, Decypharr); "download" → highest quality (4K torrent/usenet).
+  // "sym" → 1080p profile (RD/zurg symlink, instant); "down" → highest quality (4K torrent/usenet).
   function pickProfile(profiles: QualityProfile[], mode: AddMode): QualityProfile {
-    if (mode === "download") {
+    if (mode === "down") {
       return (
         profiles.find((p) => /4k|ultra|2160|uhd/i.test(p.name)) ??
         profiles[profiles.length - 1]
@@ -1029,12 +1018,14 @@ export function DiscoverView(props: { onClose: () => void }) {
         const cfg = radarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Radarr not configured");
-        await addMovie(item as ArrMovie, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path);
+        const tagId = await ensureRadarrTag(mode);
+        await addMovie(item as ArrMovie, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path, [tagId]);
       } else {
         const cfg = sonarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Sonarr not configured");
-        await addSeries(item as ArrSeries, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path);
+        const tagId = await ensureSonarrTag(mode);
+        await addSeries(item as ArrSeries, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path, [tagId]);
       }
       setAddStates((p) => ({ ...p, [key]: { mode, status: "added" } }));
     } catch (err) {
@@ -1065,7 +1056,7 @@ export function DiscoverView(props: { onClose: () => void }) {
         </Match>
         <Match when={st()?.status === "added"}>
           <span class="disc-badge disc-badge--added">
-            {st()!.mode === "watch" ? "▶ Queued" : "⬇ Queued"}
+            {st()!.mode === "sym" ? "⛓ Sym'd" : "⬇ Queued"}
           </span>
         </Match>
         <Match when={st()?.status === "error"}>
@@ -1080,17 +1071,17 @@ export function DiscoverView(props: { onClose: () => void }) {
           <div class="disc-add-btns">
             <button
               class="disc-add-btn disc-add-btn--watch"
-              title="Instant watch via Real-Debrid — HD 1080p, no wait"
-              onClick={() => handleAdd(cProps.item, cProps.type, "watch")}
+              title="Symlink via Real-Debrid / zurg — 1080p, tagged 'sym'"
+              onClick={() => handleAdd(cProps.item, cProps.type, "sym")}
             >
-              ▶ Watch
+              ⛓ Sym
             </button>
             <button
               class="disc-add-btn disc-add-btn--dl"
-              title="Download via arr — best quality up to 4K"
-              onClick={() => handleAdd(cProps.item, cProps.type, "download")}
+              title="Download via torrent / usenet — best quality up to 4K, tagged 'down'"
+              onClick={() => handleAdd(cProps.item, cProps.type, "down")}
             >
-              ⬇ 4K
+              ⬇ Down
             </button>
           </div>
         </Match>

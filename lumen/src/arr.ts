@@ -94,18 +94,35 @@ export function getSonarrRootFolders(): Promise<RootFolder[]> {
   return arrGet<RootFolder[]>("/sonarr/api/v3/rootfolder").catch(() => []);
 }
 
+// ── Tags ───────────────────────────────────────────────────────────────────
+
+interface ArrTag { id: number; label: string }
+
+async function arrEnsureTag(base: string, label: string): Promise<number> {
+  const tags = await arrGet<ArrTag[]>(`${base}/api/v3/tag`);
+  const existing = tags.find((t) => t.label.toLowerCase() === label.toLowerCase());
+  if (existing) return existing.id;
+  const created = await arrPost<ArrTag>(`${base}/api/v3/tag`, { label });
+  return created.id;
+}
+
+export const ensureRadarrTag = (label: string) => arrEnsureTag("/radarr", label);
+export const ensureSonarrTag = (label: string) => arrEnsureTag("/sonarr", label);
+
 // ── Add ────────────────────────────────────────────────────────────────────
 
 export function addMovie(
   movie: ArrMovie,
   qualityProfileId: number,
-  rootFolderPath: string
+  rootFolderPath: string,
+  tags: number[] = []
 ): Promise<ArrMovie> {
   return arrPost("/radarr/api/v3/movie", {
     ...(movie as Record<string, unknown>),
     qualityProfileId,
     rootFolderPath,
     monitored: true,
+    tags,
     minimumAvailability: movie.minimumAvailability || "announced",
     addOptions: { searchForMovie: true },
   });
@@ -114,7 +131,8 @@ export function addMovie(
 export function addSeries(
   series: ArrSeries,
   qualityProfileId: number,
-  rootFolderPath: string
+  rootFolderPath: string,
+  tags: number[] = []
 ): Promise<ArrSeries> {
   return arrPost("/sonarr/api/v3/series", {
     ...(series as Record<string, unknown>),
@@ -122,6 +140,7 @@ export function addSeries(
     rootFolderPath,
     monitored: true,
     seasonFolder: true,
+    tags,
     addOptions: { monitor: "all", searchForMissingEpisodes: true },
   });
 }

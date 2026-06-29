@@ -34,7 +34,7 @@ services:
       - SONARR_API_KEY=${SONARR_API_KEY:-}
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
-      - REAL_DEBRID_API_KEY=${REAL_DEBRID_API_KEY:-}
+      - REAL_DEBRID_API_KEY=${RD_API_KEY:-}
     depends_on:
       - radarr
       - sonarr
@@ -253,9 +253,13 @@ services:
       - lumen
     ports:
       - "9999:9999"
+    environment:
+      - RD_API_KEY=${RD_API_KEY:-}
+    entrypoint: ["/bin/sh", "/app/docker-entrypoint.sh"]
     volumes:
       - ./zurg/plex_update.sh:/app/plex_update.sh
-      - ./zurg/config.yml:/app/config.yml
+      - ./zurg/config.yml:/app/config.yml.template:ro
+      - ./zurg/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
       - zurgdata:/app/data
 
   # ═══════════════════════════════════════════════════════════

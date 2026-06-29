@@ -3,7 +3,7 @@ import { For, Match, Show, Suspense, Switch, createResource, createSignal, onCle
 import {
   getIdentity, getSections, getHubs, getToken, setToken, clearToken,
   createPin, checkPin, plexAuthUrl, PlexError,
-  type Item, type Section,
+  type Hub, type Item, type Section,
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
@@ -226,26 +226,93 @@ export function App() {
         <TopBar
           sections={sections()}
           onSignOut={handleSignOut}
-          onBrowseAll={openLibrary}
           onDiscover={() => pushLayer({ kind: "discover" })}
         />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           <Show when={home()} keyed>
-            {(data) => (
-              <main>
-                <Show when={data.hero}>
-                  {(h) => <Hero item={h()} onPlay={handleItemClick} />}
-                </Show>
-                <div class="rows">
-                  <For each={data.hubs}>
-                    {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
-                  </For>
-                  <Show when={data.hubs.length === 0}>
-                    <p class="empty">Nothing here yet.</p>
+            {(data) => {
+              // Split the continue-watching hub into TV episodes vs movies
+              const cwHub: Hub | undefined = data.hubs.find(
+                (h) => h.hubIdentifier?.includes("continue") || h.title?.toLowerCase().includes("continue watching")
+              );
+              const cwShows: Hub | null = cwHub
+                ? (() => {
+                    const items = (cwHub.Metadata ?? []).filter((it) => it.type === "episode");
+                    return items.length ? { ...cwHub, title: "Continue Watching — Shows", Metadata: items } : null;
+                  })()
+                : null;
+              const cwMovies: Hub | null = cwHub
+                ? (() => {
+                    const items = (cwHub.Metadata ?? []).filter((it) => it.type === "movie");
+                    return items.length ? { ...cwHub, title: "Continue Watching — Movies", Metadata: items } : null;
+                  })()
+                : null;
+              const restHubs = data.hubs.filter((h) => h !== cwHub);
+
+              return (
+                <main>
+                  <Show when={data.hero}>
+                    {(h) => <Hero item={h()} onPlay={handleItemClick} />}
                   </Show>
-                </div>
-              </main>
-            )}
+                  <div class="rows">
+                    <Show
+                      when={!activeSection()}
+                      fallback={
+                        /* ── Section view: browse-all shortcut + hubs ── */
+                        <>
+                          <Show when={sections().find((s) => s.key === activeSection())} keyed>
+                            {(sec) => (
+                              <div class="section-browse-bar">
+                                <button class="browse-all-btn" onClick={() => openLibrary(sec)}>
+                                  Browse All {sec.title} →
+                                </button>
+                              </div>
+                            )}
+                          </Show>
+                          <For each={data.hubs}>
+                            {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
+                          </For>
+                        </>
+                      }
+                    >
+                      {/* ── Home view: split CW + library buttons + rest ── */}
+                      <>
+                        <Show when={cwShows} keyed>
+                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
+                        </Show>
+                        <Show when={cwMovies} keyed>
+                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
+                        </Show>
+                        <Show when={sections().find((s) => s.type === "show") || sections().find((s) => s.type === "movie")}>
+                          <div class="library-shortcuts">
+                            <Show when={sections().find((s) => s.type === "show")} keyed>
+                              {(sec) => (
+                                <button class="library-shortcut-btn" onClick={() => openLibrary(sec)}>
+                                  Go To Full TV Show Library →
+                                </button>
+                              )}
+                            </Show>
+                            <Show when={sections().find((s) => s.type === "movie")} keyed>
+                              {(sec) => (
+                                <button class="library-shortcut-btn" onClick={() => openLibrary(sec)}>
+                                  Go To Full Movie Library →
+                                </button>
+                              )}
+                            </Show>
+                          </div>
+                        </Show>
+                        <For each={restHubs}>
+                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
+                        </For>
+                        <Show when={data.hubs.length === 0}>
+                          <p class="empty">Nothing here yet.</p>
+                        </Show>
+                      </>
+                    </Show>
+                  </div>
+                </main>
+              );
+            }}
           </Show>
         </Suspense>
       </div>

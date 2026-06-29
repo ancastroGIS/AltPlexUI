@@ -1,6 +1,6 @@
 zurg: v1
-# Get your token from https://real-debrid.com/apitoken
-token: YOUR_REAL_DEBRID_API_KEY
+# Token is injected from RD_API_KEY in .env at container start — do not hardcode here.
+token: __TOKEN__
 
 check_for_changes_every_secs: 10
 enable_repair: true
