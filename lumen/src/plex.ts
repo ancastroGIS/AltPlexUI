@@ -261,7 +261,9 @@ export function directPlayUrl(partKey: string): string {
   return `${BASE}${partKey}?X-Plex-Token=${encodeURIComponent(getToken())}&download=0`;
 }
 
-// Fire-and-forget timeline report so Plex tracks resume position.
+// Fire-and-forget timeline report so Plex tracks resume position and watch state.
+// Plex requires proper client-identity headers AND the identifier param to attribute
+// the session — without them the server ignores progress updates.
 export function reportProgress(
   ratingKey: string,
   timeMs: number,
@@ -271,12 +273,24 @@ export function reportProgress(
   const params = new URLSearchParams({
     ratingKey,
     key: `/library/metadata/${ratingKey}`,
+    identifier: "com.plexapp.plugins.library",
     state,
     time: String(Math.floor(timeMs)),
+    playbackTime: String(Math.floor(timeMs)),
     duration: String(Math.floor(durationMs)),
+    hasMDE: "1",
     "X-Plex-Token": getToken(),
   });
-  fetch(`${BASE}/:/timeline?${params}`).catch(() => {});
+  fetch(`${BASE}/:/timeline?${params}`, {
+    headers: {
+      "X-Plex-Token": getToken(),
+      "X-Plex-Client-Identifier": getClientId(),
+      "X-Plex-Product": "Lumen",
+      "X-Plex-Version": "1.0",
+      "X-Plex-Platform": "Web",
+      "X-Plex-Device-Name": "Lumen Web",
+    },
+  }).catch(() => {});
 }
 
 // Resized image via Plex's photo transcoder. ALWAYS request the size you render

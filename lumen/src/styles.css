@@ -22,7 +22,7 @@
   --font-body:    "Inter", system-ui, sans-serif;
   --tile-w:       158px;
   --tile-w-wide:  300px;
-  --pad-x:        48px;
+  --pad-x:        clamp(80px, 8vw, 180px);
 }
 
 * { box-sizing: border-box; }
@@ -255,10 +255,10 @@ button { font-family: inherit; cursor: pointer; }
   padding: 0 var(--pad-x);
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 0.72rem;
-  letter-spacing: 0.2em;
+  font-size: 0.92rem;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text);
   display: flex;
   align-items: center;
   gap: 0.8rem;
@@ -325,11 +325,11 @@ button { font-family: inherit; cursor: pointer; }
   display: block;
   margin-top: 0.4rem;
   font-family: var(--font-display);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1336,7 +1336,7 @@ button { font-family: inherit; cursor: pointer; }
 :focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 720px) {
-  :root { --pad-x: 20px; --tile-w: 124px; --tile-w-wide: 220px; }
+  :root { --pad-x: 24px; --tile-w: 124px; --tile-w-wide: 220px; }
   .topbar { padding: 0 var(--pad-x); }
   .nav { overflow-x: auto; scrollbar-width: none; }
   .hero { height: 56vh; }

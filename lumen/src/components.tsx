@@ -502,13 +502,24 @@ export function Player(props: { item: Item; onClose: () => void }) {
     setPlaying(false);
     clearInterval(reportTimer);
     setControlsHidden(false);
-    if (isFinite(videoEl?.duration)) {
+    // Skip the paused report when the video has ended — onVideoEnded handles it.
+    if (isFinite(videoEl?.duration) && !videoEl.ended) {
       reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
     }
   }
 
   function onTimeUpdate() { setCurrentTime(videoEl.currentTime); }
   function onDurationChange() { if (isFinite(videoEl.duration)) setDur(videoEl.duration); }
+
+  function onVideoEnded() {
+    clearInterval(reportTimer);
+    setPlaying(false);
+    // Send stopped at full duration — Plex uses this to mark the item watched
+    // and clear it from Continue Watching.
+    if (isFinite(videoEl?.duration)) {
+      reportProgress(currentItem().ratingKey, videoEl.duration * 1000, videoEl.duration * 1000, "stopped");
+    }
+  }
 
   return (
     <div
@@ -522,6 +533,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
         ref={(el) => (videoEl = el)}
         onPlay={onVideoPlay}
         onPause={onVideoPause}
+        onEnded={onVideoEnded}
         onTimeUpdate={onTimeUpdate}
         onDurationChange={onDurationChange}
         onError={() => { setLoadError("Video error — see console for details."); setLoading(false); }}
