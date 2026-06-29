@@ -270,15 +270,65 @@ button { font-family: inherit; cursor: pointer; }
   background: var(--line);
 }
 
+/* Wraps the scroller + arrow buttons; arrows overlay the edges */
+.row-track {
+  position: relative;
+}
+
 .scroller {
   display: flex;
   gap: 0.75rem;
   overflow-x: auto;
   scroll-snap-type: x proximity;
-  padding: 8px var(--pad-x) 20px;
+  /* No horizontal padding here — ::before / ::after handle the indent
+     so it survives scrolling in all browsers (padding-right is clipped by overflow). */
+  padding: 8px 0 20px;
   scrollbar-width: none;
 }
 .scroller::-webkit-scrollbar { height: 0; }
+
+/* These spacers ARE the left/right indentation.
+   As flex items they guarantee tiles never touch the screen edge. */
+.scroller::before,
+.scroller::after {
+  content: "";
+  min-width: var(--pad-x);
+  flex-shrink: 0;
+}
+
+/* ─── Row scroll arrows ───────────────────────────────────────────────────── */
+.row-arrow {
+  position: absolute;
+  top: 0;
+  bottom: 20px; /* align with scroller bottom padding */
+  width: calc(var(--pad-x) + 12px);
+  z-index: 10;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s, color 0.15s;
+  cursor: pointer;
+  padding: 0;
+  pointer-events: none;
+}
+.row-track:hover .row-arrow { opacity: 1; pointer-events: auto; }
+.row-arrow:hover { color: var(--accent); }
+.row-arrow--left {
+  left: 0;
+  background: linear-gradient(to right, rgba(10,12,15,0.95) 30%, transparent 100%);
+}
+.row-arrow--right {
+  right: 0;
+  background: linear-gradient(to left, rgba(10,12,15,0.95) 30%, transparent 100%);
+}
 
 /* ─── Tile ───────────────────────────────────────────────────────────────── */
 .tile {

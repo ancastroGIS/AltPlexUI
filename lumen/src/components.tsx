@@ -168,13 +168,23 @@ export function Tile(props: { item: Item; onPlay: (item: Item) => void }) {
 }
 
 export function Row(props: { hub: Hub; onPlay: (item: Item) => void }) {
+  let scrollerEl!: HTMLDivElement;
+
+  function scroll(dir: 1 | -1) {
+    scrollerEl.scrollBy({ left: dir * (scrollerEl.clientWidth * 0.8), behavior: "smooth" });
+  }
+
   return (
     <section class="row">
       <h2 class="row-title">{props.hub.title}</h2>
-      <div class="scroller">
-        <For each={props.hub.Metadata}>
-          {(it) => <Tile item={it} onPlay={props.onPlay} />}
-        </For>
+      <div class="row-track">
+        <button class="row-arrow row-arrow--left" onClick={() => scroll(-1)}>‹</button>
+        <div class="scroller" ref={(el) => (scrollerEl = el)}>
+          <For each={props.hub.Metadata}>
+            {(it) => <Tile item={it} onPlay={props.onPlay} />}
+          </For>
+        </div>
+        <button class="row-arrow row-arrow--right" onClick={() => scroll(1)}>›</button>
       </div>
     </section>
   );
@@ -396,11 +406,13 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearTimeout(hideTimer);
     clearInterval(reportTimer);
     window.removeEventListener("keydown", onKey);
+    // Save resume position first (paused — not stopped, so Plex doesn't race-condition
+    // against the session stop below and refuse the next start for the same item).
+    if (isFinite(videoEl?.duration) && !videoEl.ended) {
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+    }
     destroyHls();
     stopTranscodeSession(sessionId);
-    if (isFinite(videoEl?.duration)) {
-      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped");
-    }
   });
 
   function destroyHls() {

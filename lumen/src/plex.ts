@@ -240,13 +240,24 @@ export function buildHlsUrl(ratingKey: string, sessionId: string): string {
 }
 
 // Tell the Plex server to release the transcode process for this session.
-// Call on player close so the server doesn't keep a ghost transcode running.
+// keepalive ensures the request completes even during component unmount.
+// X-Plex-Client-Identifier is required so Plex can match the session to this client.
 export function stopTranscodeSession(sessionId: string): void {
   const params = new URLSearchParams({
     session: sessionId,
     "X-Plex-Token": getToken(),
+    "X-Plex-Client-Identifier": getClientId(),
   });
-  fetch(`${BASE}/video/:/transcode/universal/stop?${params}`).catch(() => {});
+  fetch(`${BASE}/video/:/transcode/universal/stop?${params}`, {
+    keepalive: true,
+    headers: {
+      "X-Plex-Token": getToken(),
+      "X-Plex-Client-Identifier": getClientId(),
+      "X-Plex-Product": "Lumen",
+      "X-Plex-Version": "1.0",
+      "X-Plex-Platform": "Web",
+    },
+  }).catch(() => {});
 }
 
 export async function getMediaPart(ratingKey: string): Promise<{ key: string }> {
@@ -282,6 +293,7 @@ export function reportProgress(
     "X-Plex-Token": getToken(),
   });
   fetch(`${BASE}/:/timeline?${params}`, {
+    keepalive: true,
     headers: {
       "X-Plex-Token": getToken(),
       "X-Plex-Client-Identifier": getClientId(),
