@@ -125,3 +125,29 @@ export function addSeries(
     addOptions: { monitor: "all", searchForMissingEpisodes: true },
   });
 }
+
+// ── Prowlarr release search ────────────────────────────────────────────────
+
+export interface ProwlarrRelease {
+  guid: string;
+  title: string;
+  size: number;
+  seeders?: number;
+  infoHash?: string;
+  downloadUrl?: string;
+  publishDate?: string;
+  indexer?: string;
+}
+
+// categories: 2000 = Movies, 5000 = TV
+export async function searchProwlarr(
+  query: string,
+  categories: number[] = [2000]
+): Promise<ProwlarrRelease[]> {
+  const cats = categories.map((c) => `categories[]=${c}`).join("&");
+  const res = await fetch(
+    `/prowlarr/api/v1/search?query=${encodeURIComponent(query)}&type=search&${cats}&limit=100`
+  );
+  if (!res.ok) return [];
+  return res.json() as Promise<ProwlarrRelease[]>;
+}

@@ -92,6 +92,19 @@ server {
         proxy_set_header Connection "";
     }
 
+    # ── Real-Debrid API proxy ─────────────────────────────────────────────
+    # REAL_DEBRID_API_KEY is injected here — browser never sees it.
+    location /api/rd/ {
+        proxy_pass https://api.real-debrid.com/rest/1.0/;
+        proxy_ssl_server_name on;
+        proxy_http_version 1.1;
+        proxy_set_header Host api.real-debrid.com;
+        proxy_set_header Authorization "Bearer ${REAL_DEBRID_API_KEY}";
+        proxy_set_header X-Real-IP "";
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Connection "";
+    }
+
     # SPA: serve the file if it exists, otherwise fall back to index.html.
     location / {
         try_files $uri $uri/ /index.html;

@@ -9,8 +9,16 @@ import {
 import {
   searchMovies, searchSeries, addMovie, addSeries, arrPoster,
   getRadarrProfiles, getRadarrRootFolders, getSonarrProfiles, getSonarrRootFolders,
-  type ArrMovie, type ArrSeries,
+  searchProwlarr, type ArrMovie, type ArrSeries, type ProwlarrRelease,
 } from "./arr";
+import {
+  PRESETS, getDeviceProfile, saveDeviceProfile,
+  parseRelease, streamCompat, scoreRelease, matchesTitle,
+  type StreamCompat,
+} from "./device";
+import {
+  checkInstantAvailability, isAvailable, type RdAvailability,
+} from "./rd";
 import { poster, backdrop, progress } from "./media";
 import { activeSection, setActiveSection, serverName, demo } from "./store";
 
@@ -906,6 +914,11 @@ export function DiscoverView(props: { onClose: () => void }) {
   const [tab, setTab] = createSignal<"movie" | "show">("movie");
   const [addStates, setAddStates] = createSignal<Record<string, "adding" | "added" | "error">>({});
 
+  // ── Device profile (persisted in localStorage) ─────────────────────────
+  const [profileId, setProfileId] = createSignal(getDeviceProfile().id);
+  const profile = () => PRESETS.find((p) => p.id === profileId()) ?? PRESETS[0];
+  createEffect(() => saveDeviceProfile(profileId()));
+
   // Debounce search input by 400 ms
   createEffect(() => {
     const q = query();
@@ -914,6 +927,7 @@ export function DiscoverView(props: { onClose: () => void }) {
     onCleanup(() => clearTimeout(t));
   });
 
+  // ── Radarr / Sonarr search ─────────────────────────────────────────────
   const [movieResults] = createResource(
     () => (tab() === "movie" ? debouncedQuery() : null) || null,
     searchMovies
@@ -932,6 +946,60 @@ export function DiscoverView(props: { onClose: () => void }) {
     Promise.all([getSonarrProfiles(), getSonarrRootFolders()])
       .then(([profiles, folders]) => ({ profiles, folders }))
   );
+
+  // ── Prowlarr release search (parallel to Radarr/Sonarr) ───────────────
+  const [prowlarrReleases] = createResource(
+    (): { q: string; categories: number[] } | null => {
+      const q = debouncedQuery();
+      const t = tab();
+      return q ? { q, categories: t === "movie" ? [2000] : [5000] } : null;
+    },
+    ({ q, categories }) =>
+      searchProwlarr(q, categories).catch((): ProwlarrRelease[] => [])
+  );
+
+  // ── RD instant-availability (fires when Prowlarr results arrive) ────────
+  const [rdAvailability] = createResource(
+    (): string | null => {
+      const releases = prowlarrReleases();
+      if (!releases?.length) return null;
+      const hashes = releases.flatMap((r) => (r.infoHash ? [r.infoHash] : []));
+      return hashes.length ? hashes.join(",") : null;
+    },
+    (hashKey) =>
+      checkInstantAvailability(hashKey.split(",")).catch((): RdAvailability => ({}))
+  );
+
+  // ── Per-card streaming compatibility ────────────────────────────────────
+  // Returns the best StreamCompat for a title/year based on currently
+  // cached RD releases scored against the selected device profile.
+  function getBestCompat(title: string, year: number): StreamCompat | null {
+    const releases = prowlarrReleases();
+    const avail = rdAvailability();
+    if (!releases?.length || !avail) return null;
+
+    const cached = releases.filter(
+      (r) => r.infoHash && isAvailable(avail, r.infoHash) && matchesTitle(r.title, title, year)
+    );
+    if (!cached.length) return null;
+
+    const prof = profile();
+    const best = cached
+      .map((r) => { const q = parseRelease(r.title); return { q, s: scoreRelease(q, prof) }; })
+      .sort((a, b) => b.s - a.s)[0];
+
+    return streamCompat(best.q, prof);
+  }
+
+  function StreamCompatBadge(bProps: { compat: StreamCompat }) {
+    const [label, cls] =
+      bProps.compat === "direct"
+        ? ["▶ Direct", "rd-badge--direct"]
+        : bProps.compat === "transcode-audio"
+        ? ["▶ ~Audio", "rd-badge--audio"]
+        : ["⚙ Transcode", "rd-badge--video"];
+    return <span class={`rd-badge ${cls}`}>{label}</span>;
+  }
 
   async function handleAdd(item: ArrMovie | ArrSeries, type: "movie" | "show") {
     const key = type === "movie"
@@ -1019,9 +1087,11 @@ export function DiscoverView(props: { onClose: () => void }) {
             <For each={gProps.items}>
               {(item) => {
                 const posterUrl = arrPoster(item.images);
-                const subtitle = gProps.type === "show"
-                  ? `${item.year}${(item as ArrSeries).status === "continuing" ? "  ·  Ongoing" : ""}`
-                  : String(item.year || "");
+                const subtitle =
+                  gProps.type === "show"
+                    ? `${item.year}${(item as ArrSeries).status === "continuing" ? "  ·  Ongoing" : ""}`
+                    : String(item.year || "");
+                const compat = () => getBestCompat(item.title, item.year);
                 return (
                   <div class="discover-card">
                     <div class="discover-poster">
@@ -1030,6 +1100,10 @@ export function DiscoverView(props: { onClose: () => void }) {
                         fallback={<div class="discover-poster-ph">{item.title[0]}</div>}
                       >
                         <img src={posterUrl} alt={item.title} loading="lazy" />
+                      </Show>
+                      {/* RD streaming compatibility badge — top-right corner */}
+                      <Show when={compat()} keyed>
+                        {(c) => <StreamCompatBadge compat={c} />}
                       </Show>
                       <div class="discover-card-action">
                         <CardAction item={item} type={gProps.type} />
@@ -1077,6 +1151,18 @@ export function DiscoverView(props: { onClose: () => void }) {
             Shows
           </button>
         </div>
+        {/* Device profile selector — controls stream-compat scoring */}
+        <select
+          class="device-select"
+          value={profileId()}
+          onChange={(e) => setProfileId(e.currentTarget.value)}
+          title="Your playback device — affects RD streaming compatibility badges"
+        >
+          <For each={PRESETS}>{(p) => <option value={p.id}>{p.label}</option>}</For>
+        </select>
+        <Show when={rdAvailability.loading || prowlarrReleases.loading}>
+          <span class="rd-checking">RD…</span>
+        </Show>
       </div>
 
       <div class="discover-body">
