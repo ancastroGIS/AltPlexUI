@@ -268,6 +268,8 @@ services:
     image: rclone/rclone:latest
     container_name: rclone
     restart: unless-stopped
+    networks:
+      - lumen
     depends_on:
       - zurg
     environment:
