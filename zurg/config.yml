@@ -17,7 +17,7 @@ directories:
     group_order: 10
     group: media
     filters:
-      - regex: "(?i)\\b(S\\d+[Ee]\\d+|Season\\s\\d+|Episode\\s\\d+|Mini.Series)\\b"
+      - regex: "(?i)(s[0-9]+e[0-9]+|season[. _-]?[0-9]+|episode[. _-]?[0-9]+|mini.series)"
   movies:
     group_order: 20
     group: media
