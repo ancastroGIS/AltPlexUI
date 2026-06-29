@@ -377,6 +377,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
   let hls: Hls | null = null;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let reportTimer: ReturnType<typeof setInterval> | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sessionId = newSessionId(); // stable for this player's lifetime
   const [currentItem, setCurrentItem] = createSignal(props.item);
@@ -404,6 +405,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
 
   onCleanup(() => {
     clearTimeout(hideTimer);
+    clearTimeout(retryTimer);
     clearInterval(reportTimer);
     window.removeEventListener("keydown", onKey);
     // Save resume position first (paused — not stopped, so Plex doesn't race-condition
@@ -419,7 +421,8 @@ export function Player(props: { item: Item; onClose: () => void }) {
     if (hls) { hls.destroy(); hls = null; }
   }
 
-  function loadItem(item: Item) {
+  function loadItem(item: Item, attempt = 0) {
+    clearTimeout(retryTimer);
     setLoading(true);
     setLoadError("");
     setCurrentTime(0);
@@ -452,8 +455,15 @@ export function Player(props: { item: Item; onClose: () => void }) {
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          setLoadError("Stream unavailable — your server may not support transcoding for this item.");
-          setLoading(false);
+          // On the first failure, the previous Plex transcode session may still be
+          // releasing server-side (especially after a seek). Destroy, wait, then retry once.
+          if (attempt === 0) {
+            destroyHls();
+            retryTimer = setTimeout(() => loadItem(item, 1), 1500);
+          } else {
+            setLoadError("Stream unavailable — your server may not support transcoding for this item.");
+            setLoading(false);
+          }
         }
       });
     } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
