@@ -2,24 +2,28 @@ zurg: v1
 # Get your token from https://real-debrid.com/apitoken
 token: YOUR_REAL_DEBRID_API_KEY
 
-host: "[::]"
-port: 9999
-concurrent_workers: 20
 check_for_changes_every_secs: 10
-enable_repair: false
-cache_network_test_results: true
-serve_from_rclone: false
-
+enable_repair: true
+auto_delete_rar_torrents: true
 on_library_update: sh plex_update.sh "$@"
 
 directories:
-  shows:
+  anime:
     group_order: 10
     group: media
     filters:
-      - regex: "(?i)(s[0-9]+e[0-9]+|season[. _-]?[0-9]+|episode[. _-]?[0-9]+|mini.series)"
-  movies:
+      - regex: /\b[a-fA-F0-9]{8}\b/
+      - any_file_inside_regex: /\b[a-fA-F0-9]{8}\b/
+
+  shows:
     group_order: 20
     group: media
     filters:
-      - regex: ".*"
+      - has_episodes: true
+
+  movies:
+    group_order: 30
+    group: media
+    only_show_the_biggest_file: true
+    filters:
+      - regex: /.*/

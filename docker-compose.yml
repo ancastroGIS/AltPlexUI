@@ -251,6 +251,8 @@ services:
     restart: unless-stopped
     networks:
       - lumen
+    ports:
+      - "9999:9999"
     volumes:
       - ./zurg/plex_update.sh:/app/plex_update.sh
       - ./zurg/config.yml:/app/config.yml
