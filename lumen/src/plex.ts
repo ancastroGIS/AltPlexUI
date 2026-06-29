@@ -281,6 +281,9 @@ export function reportProgress(
   durationMs: number,
   state: "playing" | "paused" | "stopped"
 ): void {
+  // NOTE: do NOT send hasMDE=1 here. It declares the client as Multi-Direct-Endpoint
+  // capable, which makes Plex expect MDE-shaped params on every later transcode
+  // start request — plain start.m3u8 calls then get rejected with 400 Bad Request.
   const params = new URLSearchParams({
     ratingKey,
     key: `/library/metadata/${ratingKey}`,
@@ -289,7 +292,6 @@ export function reportProgress(
     time: String(Math.floor(timeMs)),
     playbackTime: String(Math.floor(timeMs)),
     duration: String(Math.floor(durationMs)),
-    hasMDE: "1",
     "X-Plex-Token": getToken(),
   });
   fetch(`${BASE}/:/timeline?${params}`, {
