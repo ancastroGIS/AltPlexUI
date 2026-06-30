@@ -2,7 +2,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
-  buildHlsUrl, newSessionId, stopTranscodeSession, pingTranscodeSession, reportProgress,
+  buildHlsUrl, newSessionId, pingTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -410,13 +410,14 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearInterval(reportTimer);
     clearInterval(pingTimer);
     window.removeEventListener("keydown", onKey);
-    // Save resume position first (paused — not stopped, so Plex doesn't race-condition
-    // against the session stop below and refuse the next start for the same item).
     if (isFinite(videoEl?.duration) && !videoEl.ended) {
       reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused", sessionId);
     }
     destroyHls();
-    stopTranscodeSession(sessionId);
+    // Intentionally NOT calling stopTranscodeSession — explicitly stopping a session
+    // with the same client ID causes Plex to reject the next start.m3u8 from that
+    // client with 400 Bad Request. Let the session expire naturally (Plex cleans up
+    // inactive sessions after ~30s), same as NevuForPlex does.
   });
 
   function destroyHls() {
