@@ -399,6 +399,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
   const nextEp = () => { const s = siblings() ?? []; const i = currentIdx(); return i >= 0 && i < s.length - 1 ? s[i + 1] : null; };
 
   onMount(() => {
+    fetch(`/plex/?_probe=playerMount&rk=${currentItem().ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
     window.addEventListener("keydown", onKey);
     loadItem(currentItem());
   });
@@ -815,7 +816,11 @@ export function InfoView(props: {
               <Show when={isPlayable()}>
                 <button
                   class="btn btn-primary info-action-btn"
-                  onClick={(e) => { e.stopPropagation(); props.onPlay(it()); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fetch(`/plex/?_probe=playBtnTap&rk=${it().ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
+                    props.onPlay(it());
+                  }}
                 >
                   ▶ Play
                 </button>
