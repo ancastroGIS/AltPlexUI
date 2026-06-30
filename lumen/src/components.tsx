@@ -2,7 +2,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
-  buildHlsUrl, newSessionId, pingTranscodeSession, reportProgress,
+  buildHlsUrl, newSessionId, pingTranscodeSession, stopTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -413,6 +413,10 @@ export function Player(props: { item: Item; onClose: () => void }) {
       reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped", sessionId);
     }
     destroyHls();
+    // Release the server-side transcode so orphaned sessions don't pile up and
+    // saturate Plex's transcoder. Each Player mount uses a fresh sessionId, so
+    // stopping this one never blocks the next play from reopening.
+    stopTranscodeSession(sessionId);
   });
 
   function destroyHls() {

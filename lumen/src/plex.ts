@@ -219,8 +219,13 @@ function transcodeParams(ratingKey: string, sessionId: string): URLSearchParams 
     partIndex: "0",
     protocol: "hls",
     fastSeek: "1",
-    directPlay: "1",
+    // Force a full H.264 transcode. Plex otherwise direct-streams (remuxes)
+    // the source codec — HEVC remuxed into MPEG-TS plays audio only on iOS
+    // (which decodes HEVC just in fMP4) and won't decode in Firefox at all.
+    // H.264 in TS is decodable everywhere. Relies on Plex Pass HW transcoding.
+    directPlay: "0",
     directStream: "1",
+    videoCodec: "h264",
     videoResolution: "1920x1080",
     maxVideoBitrate: "20000",
     videoBitrate: "20000",
