@@ -420,7 +420,6 @@ export function Player(props: { item: Item; onClose: () => void }) {
   }
 
   function loadItem(item: Item) {
-    clearTimeout(retryTimer);
     setLoading(true);
     setLoadError("");
     setCurrentTime(0);
@@ -430,12 +429,19 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearInterval(pingTimer);
     destroyHls();
 
+    // Debug probe: fires a cheap request so nginx logs confirm loadItem ran.
+    fetch(`/plex/?_lumen_debug=loadItem&rk=${item.ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
+
     // Decision must come before start.m3u8 — it registers the session with Plex
     // and lets Plex validate transcode params. Without it, Plex rejects start.m3u8
     // with 400 on subsequent plays from the same client.
     callTranscodeDecision(item.ratingKey, sessionId)
-      .then(() => startHls(item))
-      .catch(() => {
+      .then(() => {
+        fetch(`/plex/?_lumen_debug=decision_ok&rk=${item.ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
+        startHls(item);
+      })
+      .catch((err: unknown) => {
+        fetch(`/plex/?_lumen_debug=decision_fail&rk=${item.ratingKey}&err=${encodeURIComponent(String(err))}&X-Plex-Token=${getToken()}`).catch(() => {});
         setLoadError("Stream unavailable — your server may not support transcoding for this item.");
         setLoading(false);
       });
