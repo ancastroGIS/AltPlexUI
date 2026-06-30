@@ -2,7 +2,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
-  buildHlsUrl, newSessionId, pingTranscodeSession, reportProgress,
+  buildHlsUrl, callTranscodeDecision, newSessionId, pingTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -378,7 +378,6 @@ export function Player(props: { item: Item; onClose: () => void }) {
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let reportTimer: ReturnType<typeof setInterval> | undefined;
   let pingTimer: ReturnType<typeof setInterval> | undefined;
-  let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sessionId = newSessionId(); // stable for this player's lifetime
   const [currentItem, setCurrentItem] = createSignal(props.item);
@@ -406,25 +405,21 @@ export function Player(props: { item: Item; onClose: () => void }) {
 
   onCleanup(() => {
     clearTimeout(hideTimer);
-    clearTimeout(retryTimer);
     clearInterval(reportTimer);
     clearInterval(pingTimer);
     window.removeEventListener("keydown", onKey);
+    // Send stopped so Plex marks this session done and won't block the next start.
     if (isFinite(videoEl?.duration) && !videoEl.ended) {
-      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused", sessionId);
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped", sessionId);
     }
     destroyHls();
-    // Intentionally NOT calling stopTranscodeSession — explicitly stopping a session
-    // with the same client ID causes Plex to reject the next start.m3u8 from that
-    // client with 400 Bad Request. Let the session expire naturally (Plex cleans up
-    // inactive sessions after ~30s), same as NevuForPlex does.
   });
 
   function destroyHls() {
     if (hls) { hls.destroy(); hls = null; }
   }
 
-  function loadItem(item: Item, attempt = 0) {
+  function loadItem(item: Item) {
     clearTimeout(retryTimer);
     setLoading(true);
     setLoadError("");
@@ -435,6 +430,18 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearInterval(pingTimer);
     destroyHls();
 
+    // Decision must come before start.m3u8 — it registers the session with Plex
+    // and lets Plex validate transcode params. Without it, Plex rejects start.m3u8
+    // with 400 on subsequent plays from the same client.
+    callTranscodeDecision(item.ratingKey, sessionId)
+      .then(() => startHls(item))
+      .catch(() => {
+        setLoadError("Stream unavailable — your server may not support transcoding for this item.");
+        setLoading(false);
+      });
+  }
+
+  function startHls(item: Item) {
     const hlsUrl = buildHlsUrl(item.ratingKey, sessionId);
 
     if (Hls.isSupported()) {
@@ -459,15 +466,8 @@ export function Player(props: { item: Item; onClose: () => void }) {
       });
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          // On the first failure, the previous Plex transcode session may still be
-          // releasing server-side (especially after a seek). Destroy, wait, then retry once.
-          if (attempt === 0) {
-            destroyHls();
-            retryTimer = setTimeout(() => loadItem(item, 1), 1500);
-          } else {
-            setLoadError("Stream unavailable — your server may not support transcoding for this item.");
-            setLoading(false);
-          }
+          setLoadError("Stream unavailable — your server may not support transcoding for this item.");
+          setLoading(false);
         }
       });
     } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {

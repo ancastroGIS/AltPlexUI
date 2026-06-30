@@ -210,14 +210,10 @@ export function newSessionId(): string {
   return uuid();
 }
 
-// Build a Plex Universal Transcode HLS URL.
-// directPlay=1 + directStream=1 tells Plex to:
-//   1. Serve the raw file if the client can handle it (no Plex work)
-//   2. Remux the container without re-encoding video if needed (fast)
-//   3. Fully transcode only when the codec is incompatible (HEVC, AC3, etc.)
-// The response is always an HLS .m3u8 manifest.
-export function buildHlsUrl(ratingKey: string, sessionId: string): string {
-  const params = new URLSearchParams({
+// Shared transcode params — used by both decision and start.m3u8 so they are
+// always identical. Plex rejects start.m3u8 if params differ from the decision.
+function transcodeParams(ratingKey: string, sessionId: string): URLSearchParams {
+  return new URLSearchParams({
     path: `/library/metadata/${ratingKey}`,
     mediaIndex: "0",
     partIndex: "0",
@@ -237,7 +233,19 @@ export function buildHlsUrl(ratingKey: string, sessionId: string): string {
     "X-Plex-Version": "1.0",
     "X-Plex-Session-Identifier": sessionId,
   });
-  return `${BASE}/video/:/transcode/universal/start.m3u8?${params}`;
+}
+
+// Pre-flight call required before start.m3u8. Registers the session with Plex and
+// lets it validate the transcode parameters. Without this Plex rejects start.m3u8
+// with 400 on the second play of the same item from the same client.
+export async function callTranscodeDecision(ratingKey: string, sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE}/video/:/transcode/universal/decision?${transcodeParams(ratingKey, sessionId)}`);
+  if (!res.ok) throw new Error(`Transcode decision failed (${res.status})`);
+}
+
+// Build the HLS manifest URL. Always call callTranscodeDecision first.
+export function buildHlsUrl(ratingKey: string, sessionId: string): string {
+  return `${BASE}/video/:/transcode/universal/start.m3u8?${transcodeParams(ratingKey, sessionId)}`;
 }
 
 // Keep the server-side transcode session alive. Plex silently terminates sessions
