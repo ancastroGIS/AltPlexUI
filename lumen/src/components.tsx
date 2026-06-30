@@ -2,7 +2,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
-  buildHlsUrl, newSessionId, stopTranscodeSession, reportProgress,
+  buildHlsUrl, newSessionId, stopTranscodeSession, pingTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -377,6 +377,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
   let hls: Hls | null = null;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let reportTimer: ReturnType<typeof setInterval> | undefined;
+  let pingTimer: ReturnType<typeof setInterval> | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sessionId = newSessionId(); // stable for this player's lifetime
@@ -407,6 +408,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearTimeout(hideTimer);
     clearTimeout(retryTimer);
     clearInterval(reportTimer);
+    clearInterval(pingTimer);
     window.removeEventListener("keydown", onKey);
     // Save resume position first (paused — not stopped, so Plex doesn't race-condition
     // against the session stop below and refuse the next start for the same item).
@@ -429,6 +431,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     setDur(0);
     setPlaying(false);
     clearInterval(reportTimer);
+    clearInterval(pingTimer);
     destroyHls();
 
     const hlsUrl = buildHlsUrl(item.ratingKey, sessionId);
@@ -513,16 +516,19 @@ export function Player(props: { item: Item; onClose: () => void }) {
     setPlaying(true);
     showControlsBriefly();
     clearInterval(reportTimer);
+    clearInterval(pingTimer);
     reportTimer = setInterval(() => {
       if (isFinite(videoEl?.duration)) {
         reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing");
       }
-    }, 10000);
+    }, 5000);
+    pingTimer = setInterval(() => pingTranscodeSession(sessionId), 10000);
   }
 
   function onVideoPause() {
     setPlaying(false);
     clearInterval(reportTimer);
+    clearInterval(pingTimer);
     setControlsHidden(false);
     // Skip the paused report when the video has ended — onVideoEnded handles it.
     if (isFinite(videoEl?.duration) && !videoEl.ended) {
@@ -535,6 +541,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
 
   function onVideoEnded() {
     clearInterval(reportTimer);
+    clearInterval(pingTimer);
     setPlaying(false);
     // Send stopped at full duration — Plex uses this to mark the item watched
     // and clear it from Continue Watching.

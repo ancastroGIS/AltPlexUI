@@ -239,6 +239,25 @@ export function buildHlsUrl(ratingKey: string, sessionId: string): string {
   return `${BASE}/video/:/transcode/universal/start.m3u8?${params}`;
 }
 
+// Keep the server-side transcode session alive. Plex silently terminates sessions
+// that stop receiving pings, after which timeline reports are ignored.
+export function pingTranscodeSession(sessionId: string): void {
+  const params = new URLSearchParams({
+    session: sessionId,
+    "X-Plex-Token": getToken(),
+    "X-Plex-Client-Identifier": getClientId(),
+  });
+  fetch(`${BASE}/video/:/transcode/universal/ping?${params}`, {
+    headers: {
+      "X-Plex-Token": getToken(),
+      "X-Plex-Client-Identifier": getClientId(),
+      "X-Plex-Product": "Lumen",
+      "X-Plex-Version": "1.0",
+      "X-Plex-Platform": "Web",
+    },
+  }).catch(() => {});
+}
+
 // Tell the Plex server to release the transcode process for this session.
 // keepalive ensures the request completes even during component unmount.
 // X-Plex-Client-Identifier is required so Plex can match the session to this client.
@@ -288,6 +307,7 @@ export function reportProgress(
     ratingKey,
     key: `/library/metadata/${ratingKey}`,
     identifier: "com.plexapp.plugins.library",
+    context: "library",
     state,
     time: String(Math.floor(timeMs)),
     playbackTime: String(Math.floor(timeMs)),
