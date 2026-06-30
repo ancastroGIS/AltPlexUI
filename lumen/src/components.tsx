@@ -413,7 +413,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     // Save resume position first (paused — not stopped, so Plex doesn't race-condition
     // against the session stop below and refuse the next start for the same item).
     if (isFinite(videoEl?.duration) && !videoEl.ended) {
-      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused", sessionId);
     }
     destroyHls();
     stopTranscodeSession(sessionId);
@@ -506,7 +506,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
 
   function playItem(item: Item) {
     if (isFinite(videoEl?.duration)) {
-      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped");
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "stopped", sessionId);
     }
     setCurrentItem(item);
     loadItem(item);
@@ -519,7 +519,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearInterval(pingTimer);
     reportTimer = setInterval(() => {
       if (isFinite(videoEl?.duration)) {
-        reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing");
+        reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "playing", sessionId);
       }
     }, 5000);
     pingTimer = setInterval(() => pingTranscodeSession(sessionId), 10000);
@@ -532,7 +532,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     setControlsHidden(false);
     // Skip the paused report when the video has ended — onVideoEnded handles it.
     if (isFinite(videoEl?.duration) && !videoEl.ended) {
-      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused");
+      reportProgress(currentItem().ratingKey, videoEl.currentTime * 1000, videoEl.duration * 1000, "paused", sessionId);
     }
   }
 
@@ -546,7 +546,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     // Send stopped at full duration — Plex uses this to mark the item watched
     // and clear it from Continue Watching.
     if (isFinite(videoEl?.duration)) {
-      reportProgress(currentItem().ratingKey, videoEl.duration * 1000, videoEl.duration * 1000, "stopped");
+      reportProgress(currentItem().ratingKey, videoEl.duration * 1000, videoEl.duration * 1000, "stopped", sessionId);
     }
   }
 

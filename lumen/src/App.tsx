@@ -188,7 +188,7 @@ export function App() {
 
   // ── Data loading ─────────────────────────────────────────────────────────
 
-  const [home] = createResource(
+  const [home, { refetch: refetchHome }] = createResource(
     () => (status() === "ready" ? { demo: demo(), section: activeSection() } : null),
     async (src): Promise<{ hero?: Item; hubs: typeof mockHubs }> => {
       if (src.demo) return { hero: mockHero, hubs: mockHubs };
@@ -356,7 +356,7 @@ export function App() {
           {(l) => (
             <Player
               item={l().item}
-              onClose={goBack}
+              onClose={() => { goBack(); refetchHome(); }}
             />
           )}
         </Match>

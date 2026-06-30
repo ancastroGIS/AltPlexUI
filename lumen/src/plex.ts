@@ -231,7 +231,7 @@ export function buildHlsUrl(ratingKey: string, sessionId: string): string {
     audioBoost: "100",
     "X-Plex-Token": getToken(),
     "X-Plex-Client-Identifier": getClientId(),
-    "X-Plex-Platform": "Chrome",
+    "X-Plex-Platform": "Web",
     "X-Plex-Product": "Lumen",
     "X-Plex-Version": "1.0",
     "X-Plex-Session-Identifier": sessionId,
@@ -292,17 +292,17 @@ export function directPlayUrl(partKey: string): string {
 }
 
 // Fire-and-forget timeline report so Plex tracks resume position and watch state.
-// Plex requires proper client-identity headers AND the identifier param to attribute
-// the session — without them the server ignores progress updates.
+// sessionId must match the X-Plex-Session-Identifier sent in the transcode URL so
+// Plex can associate the progress report with the correct active session.
+// NOTE: do NOT send hasMDE=1 here. It declares the client as MDE-capable, causing
+// Plex to expect MDE params on subsequent start.m3u8 calls → 400 Bad Request.
 export function reportProgress(
   ratingKey: string,
   timeMs: number,
   durationMs: number,
-  state: "playing" | "paused" | "stopped"
+  state: "playing" | "paused" | "stopped",
+  sessionId: string
 ): void {
-  // NOTE: do NOT send hasMDE=1 here. It declares the client as Multi-Direct-Endpoint
-  // capable, which makes Plex expect MDE-shaped params on every later transcode
-  // start request — plain start.m3u8 calls then get rejected with 400 Bad Request.
   const params = new URLSearchParams({
     ratingKey,
     key: `/library/metadata/${ratingKey}`,
@@ -312,6 +312,7 @@ export function reportProgress(
     time: String(Math.floor(timeMs)),
     playbackTime: String(Math.floor(timeMs)),
     duration: String(Math.floor(durationMs)),
+    "X-Plex-Session-Identifier": sessionId,
     "X-Plex-Token": getToken(),
   });
   fetch(`${BASE}/:/timeline?${params}`, {
@@ -323,6 +324,7 @@ export function reportProgress(
       "X-Plex-Version": "1.0",
       "X-Plex-Platform": "Web",
       "X-Plex-Device-Name": "Lumen Web",
+      "X-Plex-Session-Identifier": sessionId,
     },
   }).catch(() => {});
 }
