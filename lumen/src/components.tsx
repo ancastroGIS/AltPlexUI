@@ -2,7 +2,7 @@
 import { For, Match, Show, Switch, createResource, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import Hls from "hls.js";
 import {
-  buildHlsUrl, callTranscodeDecision, newSessionId, pingTranscodeSession, reportProgress,
+  buildHlsUrl, newSessionId, pingTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
   type Hub, type Item, type Section,
 } from "./plex";
@@ -399,7 +399,6 @@ export function Player(props: { item: Item; onClose: () => void }) {
   const nextEp = () => { const s = siblings() ?? []; const i = currentIdx(); return i >= 0 && i < s.length - 1 ? s[i + 1] : null; };
 
   onMount(() => {
-    fetch(`/plex/?_probe=playerMount&rk=${currentItem().ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
     window.addEventListener("keydown", onKey);
     loadItem(currentItem());
   });
@@ -430,22 +429,7 @@ export function Player(props: { item: Item; onClose: () => void }) {
     clearInterval(pingTimer);
     destroyHls();
 
-    // Debug probe: fires a cheap request so nginx logs confirm loadItem ran.
-    fetch(`/plex/?_lumen_debug=loadItem&rk=${item.ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
-
-    // Decision must come before start.m3u8 — it registers the session with Plex
-    // and lets Plex validate transcode params. Without it, Plex rejects start.m3u8
-    // with 400 on subsequent plays from the same client.
-    callTranscodeDecision(item.ratingKey, sessionId)
-      .then(() => {
-        fetch(`/plex/?_lumen_debug=decision_ok&rk=${item.ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
-        startHls(item);
-      })
-      .catch((err: unknown) => {
-        fetch(`/plex/?_lumen_debug=decision_fail&rk=${item.ratingKey}&err=${encodeURIComponent(String(err))}&X-Plex-Token=${getToken()}`).catch(() => {});
-        setLoadError("Stream unavailable — your server may not support transcoding for this item.");
-        setLoading(false);
-      });
+    startHls(item);
   }
 
   function startHls(item: Item) {
@@ -818,7 +802,6 @@ export function InfoView(props: {
                   class="btn btn-primary info-action-btn"
                   onClick={(e) => {
                     e.stopPropagation();
-                    fetch(`/plex/?_probe=playBtnTap&rk=${it().ratingKey}&X-Plex-Token=${getToken()}`).catch(() => {});
                     props.onPlay(it());
                   }}
                 >
