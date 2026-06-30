@@ -231,7 +231,7 @@ export function buildHlsUrl(ratingKey: string, sessionId: string): string {
     audioBoost: "100",
     "X-Plex-Token": getToken(),
     "X-Plex-Client-Identifier": getClientId(),
-    "X-Plex-Platform": "Web",
+    "X-Plex-Platform": "Chrome",
     "X-Plex-Product": "Lumen",
     "X-Plex-Version": "1.0",
     "X-Plex-Session-Identifier": sessionId,
