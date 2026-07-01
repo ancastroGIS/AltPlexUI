@@ -9,7 +9,6 @@ import {
 import {
   searchMovies, searchSeries, addMovie, addSeries, arrPoster,
   getRadarrProfiles, getRadarrRootFolders, getSonarrProfiles, getSonarrRootFolders,
-  ensureRadarrTag, ensureSonarrTag,
   searchProwlarr, type ArrMovie, type ArrSeries, type ProwlarrRelease,
 } from "./arr";
 import {
@@ -1043,6 +1042,18 @@ export function DiscoverView(props: { onClose: () => void }) {
     );
   }
 
+  // "sym" → the Real-Debrid symlink root folder (path contains "symlink");
+  // "down" → the local library root folder. Radarr and Sonarr list these in
+  // different orders, so match on the path rather than a fixed index. Radarr's
+  // auto-tagging rules key off this root folder to apply the symlink/down tag —
+  // Lumen deliberately sends no tags of its own so those rules stay the single
+  // source of truth.
+  function pickFolder(folders: { path: string }[], mode: AddMode): string {
+    const isSym = (p: string) => /symlink/i.test(p);
+    const match = folders.find((f) => (mode === "sym" ? isSym(f.path) : !isSym(f.path)));
+    return (match ?? folders[0]).path;
+  }
+
   async function handleAdd(item: ArrMovie | ArrSeries, type: "movie" | "show", mode: AddMode) {
     const key = type === "movie"
       ? `m-${(item as ArrMovie).tmdbId}`
@@ -1053,14 +1064,12 @@ export function DiscoverView(props: { onClose: () => void }) {
         const cfg = radarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Radarr not configured");
-        const tagId = await ensureRadarrTag(mode);
-        await addMovie(item as ArrMovie, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path, [tagId]);
+        await addMovie(item as ArrMovie, pickProfile(cfg.profiles, mode).id, pickFolder(cfg.folders, mode));
       } else {
         const cfg = sonarrCfg();
         if (!cfg?.profiles.length || !cfg?.folders.length)
           throw new Error("Sonarr not configured");
-        const tagId = await ensureSonarrTag(mode);
-        await addSeries(item as ArrSeries, pickProfile(cfg.profiles, mode).id, cfg.folders[0].path, [tagId]);
+        await addSeries(item as ArrSeries, pickProfile(cfg.profiles, mode).id, pickFolder(cfg.folders, mode));
       }
       setAddStates((p) => ({ ...p, [key]: { mode, status: "added" } }));
     } catch (err) {
