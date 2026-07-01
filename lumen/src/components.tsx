@@ -21,7 +21,9 @@ import {
   checkInstantAvailability, isAvailable, type RdAvailability,
 } from "./rd";
 import { poster, backdrop, progress } from "./media";
-import { activeSection, setActiveSection, serverName, demo } from "./store";
+import { serverName, demo } from "./store";
+import { A, useNavigate } from "@solidjs/router";
+import { sectionPath } from "./routes";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -72,8 +74,8 @@ export function fmt(s: number): string {
 export function TopBar(props: {
   sections: Section[];
   onSignOut: () => void;
-  onDiscover: () => void;
 }) {
+  const navigate = useNavigate();
   return (
     <header class="topbar">
       <div class="wordmark">
@@ -81,22 +83,15 @@ export function TopBar(props: {
         Lumen
       </div>
       <nav class="nav">
-        <button
-          class="nav-link"
-          classList={{ active: activeSection() === "" }}
-          onClick={() => setActiveSection("")}
-        >
+        {/* end => only active on the exact home path, not every route */}
+        <A class="nav-link" activeClass="active" end href="/">
           Home
-        </button>
+        </A>
         <For each={props.sections}>
           {(s) => (
-            <button
-              class="nav-link"
-              classList={{ active: activeSection() === s.key }}
-              onClick={() => setActiveSection(s.key)}
-            >
+            <A class="nav-link" activeClass="active" href={sectionPath(s)}>
               {s.title}
-            </button>
+            </A>
           )}
         </For>
       </nav>
@@ -107,7 +102,7 @@ export function TopBar(props: {
         <Show when={serverName()}>
           <span class="server">{serverName()}</span>
         </Show>
-        <button class="discover-trigger" onClick={props.onDiscover} title="Add media">
+        <button class="discover-trigger" onClick={() => navigate("/discover")} title="Add media">
           + Add Media
         </button>
         <button class="sign-out" onClick={props.onSignOut}>Sign out</button>

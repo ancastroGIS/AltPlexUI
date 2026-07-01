@@ -9,5 +9,3 @@ export const [demo, setDemo] = createSignal(false);
 export const [serverName, setServerName] = createSignal("");
 export const [errorMsg, setErrorMsg] = createSignal("");
 export const [pinData, setPinData] = createSignal<PinData | null>(null);
-// "" = Home (global hubs); otherwise a library section key
-export const [activeSection, setActiveSection] = createSignal("");

@@ -1,94 +1,43 @@
 // src/App.tsx
-import { For, Match, Show, Suspense, Switch, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Router, Route, useNavigate, useParams, useLocation, A } from "@solidjs/router";
 import {
-  getIdentity, getSections, getHubs, getToken, setToken, clearToken,
+  getIdentity, getSections, getHubs, getDetails, getToken, setToken, clearToken,
   createPin, checkPin, plexAuthUrl, PlexError,
   type Hub, type Item, type Section,
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
 import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
+import { itemPath, watchPath, browsePath, gridPath } from "./routes";
 import {
   status, setStatus,
   demo, setDemo,
   setServerName, errorMsg, setErrorMsg,
   pinData, setPinData,
-  activeSection,
 } from "./store";
 
-// ── Navigation layer types ─────────────────────────────────────────────────
-
-type PlayerLayer   = { kind: "player";   item: Item };
-type LibraryLayer  = { kind: "library";  sectionKey: string; title: string; sectionType: string };
-type DetailLayer   = { kind: "detail";   item: Item };
-type InfoLayer     = { kind: "info";     item: Item };
-type DiscoverLayer = { kind: "discover" };
-type NavLayer = PlayerLayer | LibraryLayer | DetailLayer | InfoLayer | DiscoverLayer;
+// Pick a hero image for a set of hubs: first item that has backdrop art, else
+// just the first item available.
+function pickHero(hubs: Hub[]): Item | undefined {
+  for (const h of hubs) {
+    const withArt = (h.Metadata || []).find((it) => it.art);
+    if (withArt) return withArt;
+  }
+  return hubs[0]?.Metadata?.[0];
+}
 
 // ── App ────────────────────────────────────────────────────────────────────
 
 export function App() {
   const [sections, setSections] = createSignal<Section[]>([]);
-  const [navStack, setNavStack] = createSignal<NavLayer[]>([]);
   let stopPoll: (() => void) | undefined;
 
-  // Typed accessors for the top navigation layer
-  const topLayer    = () => { const s = navStack(); return s[s.length - 1] ?? null; };
-  const playerLayer   = (): PlayerLayer   | null => { const l = topLayer(); return l?.kind === "player"   ? l : null; };
-  const libraryLayer  = (): LibraryLayer  | null => { const l = topLayer(); return l?.kind === "library"  ? l : null; };
-  const detailLayer   = (): DetailLayer   | null => { const l = topLayer(); return l?.kind === "detail"   ? l : null; };
-  const infoLayer     = (): InfoLayer     | null => { const l = topLayer(); return l?.kind === "info"     ? l : null; };
-  const discoverLayer = (): DiscoverLayer | null => { const l = topLayer(); return l?.kind === "discover" ? l : null; };
-
   onMount(() => {
-    // Seed the history so the first back button pops our layers, not the browser tab
-    history.replaceState({ lumenDepth: 0 }, "");
-    window.addEventListener("popstate", handlePop);
-
     const cleanup = initSpatialNav();
-    onCleanup(() => {
-      window.removeEventListener("popstate", handlePop);
-      cleanup();
-    });
-
+    onCleanup(cleanup);
     if (getToken()) connect();
   });
-
-  function handlePop(e: PopStateEvent) {
-    const depth = (e.state as { lumenDepth?: number })?.lumenDepth ?? 0;
-    setNavStack((prev) => prev.slice(0, depth));
-  }
-
-  function pushLayer(layer: NavLayer) {
-    setNavStack((prev) => {
-      const next = [...prev, layer];
-      history.pushState({ lumenDepth: next.length }, "");
-      return next;
-    });
-  }
-
-  // X buttons and programmatic close call this — it goes back in history,
-  // which fires popstate, which calls setNavStack to pop the layer.
-  function goBack() {
-    history.back();
-  }
-
-  // Route an item click.
-  // Episodes and tracks play immediately. Seasons drill to episode list.
-  // Everything else (movie, show, artist, album) opens the info page first.
-  function handleItemClick(item: Item) {
-    if (item.type === "episode" || item.type === "track") {
-      pushLayer({ kind: "player", item });
-    } else if (item.type === "season") {
-      pushLayer({ kind: "detail", item });
-    } else {
-      pushLayer({ kind: "info", item });
-    }
-  }
-
-  function openLibrary(section: Section) {
-    pushLayer({ kind: "library", sectionKey: section.key, title: section.title, sectionType: section.type });
-  }
 
   // ── Server connection ────────────────────────────────────────────────────
 
@@ -168,11 +117,10 @@ export function App() {
     setServerName("");
     setErrorMsg("");
     setPinData(null);
-    setNavStack([]);
     setDemo(false);
     setStatus("setup");
-    // Reset history depth so back button doesn't re-open closed layers
-    history.replaceState({ lumenDepth: 0 }, "");
+    // Drop any deep route so re-login starts at home.
+    window.history.replaceState({}, "", "/");
   }
 
   function startDemo() {
@@ -187,20 +135,227 @@ export function App() {
   }
 
   // ── Data loading ─────────────────────────────────────────────────────────
+  // Global home hubs. Stays mounted in App scope so it survives route changes
+  // and can be refetched after playback to refresh Continue Watching.
 
   const [home, { refetch: refetchHome }] = createResource(
-    () => (status() === "ready" ? { demo: demo(), section: activeSection() } : null),
+    () => (status() === "ready" ? { demo: demo() } : null),
     async (src): Promise<{ hero?: Item; hubs: typeof mockHubs }> => {
       if (src.demo) return { hero: mockHero, hubs: mockHubs };
-      const hubs = await getHubs(src.section || undefined);
-      let hero: Item | undefined = hubs[0]?.Metadata?.[0];
-      for (const h of hubs) {
-        const withArt = (h.Metadata || []).find((it) => it.art);
-        if (withArt) { hero = withArt; break; }
-      }
-      return { hero, hubs };
+      const hubs = await getHubs();
+      return { hero: pickHero(hubs), hubs };
     }
   );
+
+  // ── Route components (close over App state) ──────────────────────────────
+
+  // Chrome layout for browsy pages: top bar + the matched child page.
+  function Shell(props: { children?: JSX.Element }) {
+    return (
+      <div class="app">
+        <TopBar sections={sections()} onSignOut={handleSignOut} />
+        <Suspense fallback={<div class="loading">Loading your library…</div>}>
+          {props.children}
+        </Suspense>
+      </div>
+    );
+  }
+
+  // Resolve the Item for a detail/playback route: use the object passed via
+  // navigation state for instant in-app nav, else fetch it by ratingKey so a
+  // cold deep-link (refresh / shared URL) still works.
+  function useResolvedItem() {
+    const params = useParams();
+    const loc = useLocation();
+    const stateItem = () => (loc.state as { item?: Item } | null)?.item;
+    const [fetched] = createResource(
+      () => (stateItem() ? null : params.ratingKey),
+      (rk) => getDetails(rk)
+    );
+    return () => stateItem() ?? fetched();
+  }
+
+  function HomeRoute() {
+    const navigate = useNavigate();
+    const onPlay = (item: Item) => navigate(itemPath(item), { state: { item } });
+    return (
+      <Show when={home()} keyed>
+        {(data) => {
+          const cwHub: Hub | undefined = data.hubs.find(
+            (h) => h.hubIdentifier?.includes("continue") || h.title?.toLowerCase().includes("continue watching")
+          );
+          const cwShows: Hub | null = cwHub
+            ? (() => {
+                const items = (cwHub.Metadata ?? []).filter((it) => it.type === "episode");
+                return items.length ? { ...cwHub, title: "Continue Watching — Shows", Metadata: items } : null;
+              })()
+            : null;
+          const cwMovies: Hub | null = cwHub
+            ? (() => {
+                const items = (cwHub.Metadata ?? []).filter((it) => it.type === "movie");
+                return items.length ? { ...cwHub, title: "Continue Watching — Movies", Metadata: items } : null;
+              })()
+            : null;
+          const restHubs = data.hubs.filter((h) => h !== cwHub);
+
+          return (
+            <main>
+              <Show when={data.hero}>
+                {(h) => <Hero item={h()} onPlay={onPlay} />}
+              </Show>
+              <div class="rows">
+                <Show when={cwShows} keyed>
+                  {(hub) => <Row hub={hub} onPlay={onPlay} />}
+                </Show>
+                <Show when={cwMovies} keyed>
+                  {(hub) => <Row hub={hub} onPlay={onPlay} />}
+                </Show>
+                <Show when={sections().find((s) => s.type === "show") || sections().find((s) => s.type === "movie")}>
+                  <div class="library-shortcuts">
+                    <Show when={sections().find((s) => s.type === "show")} keyed>
+                      {(sec) => (
+                        <A class="library-shortcut-btn" href={gridPath(sec)}>
+                          Go To Full TV Show Library →
+                        </A>
+                      )}
+                    </Show>
+                    <Show when={sections().find((s) => s.type === "movie")} keyed>
+                      {(sec) => (
+                        <A class="library-shortcut-btn" href={gridPath(sec)}>
+                          Go To Full Movie Library →
+                        </A>
+                      )}
+                    </Show>
+                  </div>
+                </Show>
+                <For each={restHubs}>
+                  {(hub) => <Row hub={hub} onPlay={onPlay} />}
+                </For>
+                <Show when={data.hubs.length === 0}>
+                  <p class="empty">Nothing here yet.</p>
+                </Show>
+              </div>
+            </main>
+          );
+        }}
+      </Show>
+    );
+  }
+
+  function SectionRoute() {
+    const params = useParams();
+    const navigate = useNavigate();
+    const onPlay = (item: Item) => navigate(itemPath(item), { state: { item } });
+    const [data] = createResource(
+      () => params.key,
+      async (key) => {
+        const hubs = await getHubs(key);
+        return { hubs, hero: pickHero(hubs), sec: sections().find((s) => s.key === key) };
+      }
+    );
+    return (
+      <Show when={data()} keyed>
+        {(d) => (
+          <main>
+            <Show when={d.hero}>
+              {(h) => <Hero item={h()} onPlay={onPlay} />}
+            </Show>
+            <div class="rows">
+              <Show when={d.sec} keyed>
+                {(sec) => (
+                  <div class="section-browse-bar">
+                    <A class="browse-all-btn" href={gridPath(sec)}>
+                      Browse All {sec.title} →
+                    </A>
+                  </div>
+                )}
+              </Show>
+              <For each={d.hubs}>
+                {(hub) => <Row hub={hub} onPlay={onPlay} />}
+              </For>
+              <Show when={d.hubs.length === 0}>
+                <p class="empty">Nothing here yet.</p>
+              </Show>
+            </div>
+          </main>
+        )}
+      </Show>
+    );
+  }
+
+  // Standalone full-screen pages (no top bar) ─────────────────────────────────
+
+  function GridRoute() {
+    const params = useParams();
+    const navigate = useNavigate();
+    const sec = () => sections().find((s) => s.key === params.key);
+    return (
+      <Show when={sec()} keyed fallback={<div class="loading">Loading…</div>}>
+        {(s) => (
+          <LibraryGrid
+            sectionKey={s.key}
+            title={s.title}
+            sectionType={s.type}
+            onClose={() => navigate(-1)}
+            onItemClick={(item) => navigate(itemPath(item), { state: { item } })}
+          />
+        )}
+      </Show>
+    );
+  }
+
+  function InfoRoute() {
+    const navigate = useNavigate();
+    const item = useResolvedItem();
+    return (
+      <Show when={item()} keyed fallback={<div class="loading">Loading…</div>}>
+        {(it) => (
+          <InfoView
+            item={it}
+            onClose={() => navigate(-1)}
+            onPlay={(x) => navigate(watchPath(x), { state: { item: x } })}
+            onBrowseChildren={(x) => navigate(browsePath(x), { state: { item: x } })}
+          />
+        )}
+      </Show>
+    );
+  }
+
+  function BrowseRoute() {
+    const navigate = useNavigate();
+    const item = useResolvedItem();
+    return (
+      <Show when={item()} keyed fallback={<div class="loading">Loading…</div>}>
+        {(it) => (
+          <DetailView
+            item={it}
+            onClose={() => navigate(-1)}
+            onItemClick={(x) => navigate(itemPath(x), { state: { item: x } })}
+          />
+        )}
+      </Show>
+    );
+  }
+
+  function WatchRoute() {
+    const navigate = useNavigate();
+    const item = useResolvedItem();
+    return (
+      <Show when={item()} keyed fallback={<div class="loading">Loading…</div>}>
+        {(it) => (
+          <Player
+            item={it}
+            onClose={() => { navigate(-1); refetchHome(); }}
+          />
+        )}
+      </Show>
+    );
+  }
+
+  function DiscoverRoute() {
+    const navigate = useNavigate();
+    return <DiscoverView onClose={() => navigate(-1)} />;
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -221,146 +376,17 @@ export function App() {
         />
       }
     >
-      {/* ── Base view (always mounted, overlays appear on top) ─────────── */}
-      <div class="app">
-        <TopBar
-          sections={sections()}
-          onSignOut={handleSignOut}
-          onDiscover={() => pushLayer({ kind: "discover" })}
-        />
-        <Suspense fallback={<div class="loading">Loading your library…</div>}>
-          <Show when={home()} keyed>
-            {(data) => {
-              // Split the continue-watching hub into TV episodes vs movies
-              const cwHub: Hub | undefined = data.hubs.find(
-                (h) => h.hubIdentifier?.includes("continue") || h.title?.toLowerCase().includes("continue watching")
-              );
-              const cwShows: Hub | null = cwHub
-                ? (() => {
-                    const items = (cwHub.Metadata ?? []).filter((it) => it.type === "episode");
-                    return items.length ? { ...cwHub, title: "Continue Watching — Shows", Metadata: items } : null;
-                  })()
-                : null;
-              const cwMovies: Hub | null = cwHub
-                ? (() => {
-                    const items = (cwHub.Metadata ?? []).filter((it) => it.type === "movie");
-                    return items.length ? { ...cwHub, title: "Continue Watching — Movies", Metadata: items } : null;
-                  })()
-                : null;
-              const restHubs = data.hubs.filter((h) => h !== cwHub);
-
-              return (
-                <main>
-                  <Show when={data.hero}>
-                    {(h) => <Hero item={h()} onPlay={handleItemClick} />}
-                  </Show>
-                  <div class="rows">
-                    <Show
-                      when={!activeSection()}
-                      fallback={
-                        /* ── Section view: browse-all shortcut + hubs ── */
-                        <>
-                          <Show when={sections().find((s) => s.key === activeSection())} keyed>
-                            {(sec) => (
-                              <div class="section-browse-bar">
-                                <button class="browse-all-btn" onClick={() => openLibrary(sec)}>
-                                  Browse All {sec.title} →
-                                </button>
-                              </div>
-                            )}
-                          </Show>
-                          <For each={data.hubs}>
-                            {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
-                          </For>
-                        </>
-                      }
-                    >
-                      {/* ── Home view: split CW + library buttons + rest ── */}
-                      <>
-                        <Show when={cwShows} keyed>
-                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
-                        </Show>
-                        <Show when={cwMovies} keyed>
-                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
-                        </Show>
-                        <Show when={sections().find((s) => s.type === "show") || sections().find((s) => s.type === "movie")}>
-                          <div class="library-shortcuts">
-                            <Show when={sections().find((s) => s.type === "show")} keyed>
-                              {(sec) => (
-                                <button class="library-shortcut-btn" onClick={() => openLibrary(sec)}>
-                                  Go To Full TV Show Library →
-                                </button>
-                              )}
-                            </Show>
-                            <Show when={sections().find((s) => s.type === "movie")} keyed>
-                              {(sec) => (
-                                <button class="library-shortcut-btn" onClick={() => openLibrary(sec)}>
-                                  Go To Full Movie Library →
-                                </button>
-                              )}
-                            </Show>
-                          </div>
-                        </Show>
-                        <For each={restHubs}>
-                          {(hub) => <Row hub={hub} onPlay={handleItemClick} />}
-                        </For>
-                        <Show when={data.hubs.length === 0}>
-                          <p class="empty">Nothing here yet.</p>
-                        </Show>
-                      </>
-                    </Show>
-                  </div>
-                </main>
-              );
-            }}
-          </Show>
-        </Suspense>
-      </div>
-
-      {/* ── Overlay layers (only the topmost renders) ─────────────────── */}
-      <Switch>
-        <Match when={discoverLayer()}>
-          <DiscoverView onClose={goBack} />
-        </Match>
-        <Match when={libraryLayer()}>
-          {(l) => (
-            <LibraryGrid
-              sectionKey={l().sectionKey}
-              title={l().title}
-              sectionType={l().sectionType}
-              onClose={goBack}
-              onItemClick={handleItemClick}
-            />
-          )}
-        </Match>
-        <Match when={infoLayer()}>
-          {(l) => (
-            <InfoView
-              item={l().item}
-              onClose={goBack}
-              onPlay={(item) => pushLayer({ kind: "player", item })}
-              onBrowseChildren={(item) => pushLayer({ kind: "detail", item })}
-            />
-          )}
-        </Match>
-        <Match when={detailLayer()}>
-          {(l) => (
-            <DetailView
-              item={l().item}
-              onClose={goBack}
-              onItemClick={handleItemClick}
-            />
-          )}
-        </Match>
-        <Match when={playerLayer()}>
-          {(l) => (
-            <Player
-              item={l().item}
-              onClose={() => { goBack(); refetchHome(); }}
-            />
-          )}
-        </Match>
-      </Switch>
+      <Router>
+        <Route path="/" component={Shell}>
+          <Route path="/" component={HomeRoute} />
+          <Route path="/library/:key/:slug?" component={SectionRoute} />
+        </Route>
+        <Route path="/all/:key/:slug?" component={GridRoute} />
+        <Route path="/info/:ratingKey/:slug?" component={InfoRoute} />
+        <Route path="/browse/:ratingKey/:slug?" component={BrowseRoute} />
+        <Route path="/watch/:ratingKey/:slug?" component={WatchRoute} />
+        <Route path="/discover" component={DiscoverRoute} />
+      </Router>
     </Show>
   );
 }
