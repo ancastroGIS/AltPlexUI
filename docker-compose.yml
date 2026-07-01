@@ -170,7 +170,11 @@ services:
       - ${MOVIES_PATH}:/movies
       - ${DOWNLOADS_PATH}:/downloads
       - ${MEDIA_BASE}:/all:rshared
-      - /mnt/zurg/__all__:/mnt/zurg/__all__:ro
+      # Mount the zurg FUSE mountpoint itself with slave propagation so
+      # rclone (re)mounts on the host stay visible inside the container.
+      # Binding a subpath with default (rprivate) propagation leaves the
+      # container on a stale, empty mountpoint after any zurg remount.
+      - /mnt/zurg:/mnt/zurg:rslave
 
   # ═══════════════════════════════════════════════════════════
   #  SONARR — TV show management
@@ -195,7 +199,8 @@ services:
       - ${MEDIA_BASE}:/all:rshared
       - ${DOWNLOADS_PATH}:/downloads:rshared
       - ${SYMLINKS_PATH}:/symLinks:rshared
-      - /mnt/zurg/__all__:/mnt/zurg/__all__
+      # See radarr above: rslave keeps the zurg FUSE mount visible in-container.
+      - /mnt/zurg:/mnt/zurg:rslave
 
   # ═══════════════════════════════════════════════════════════
   #  LIDARR — music management
@@ -217,7 +222,8 @@ services:
       - ${MUSIC_PATH}:/music
       - ${DOWNLOADS_PATH}:/downloads:rshared
       - ${MEDIA_BASE}:/all:rshared
-      - /mnt/zurg/__all__:/mnt/zurg/__all__:ro
+      # See radarr above: rslave keeps the zurg FUSE mount visible in-container.
+      - /mnt/zurg:/mnt/zurg:rslave
 
   # ═══════════════════════════════════════════════════════════
   #  DECYPHARR — Real-Debrid blackhole download client for arr
