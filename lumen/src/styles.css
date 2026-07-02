@@ -99,28 +99,117 @@ button { font-family: inherit; cursor: pointer; }
 }
 .wordmark.big { font-size: 1.75rem; letter-spacing: 0.16em; }
 
-.nav { display: flex; gap: 0; flex: 1; height: 100%; }
-.nav-link {
+/* Hamburger — opens the drawer */
+.hamburger {
   border: 0;
-  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 0 1rem 0 0;
+  margin-right: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.hamburger span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--text);
+  transition: background 0.15s;
+}
+.hamburger:hover span { background: var(--accent); }
+
+.topbar-search {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.topbar-search:hover { color: var(--accent); }
+
+/* ── Drawer (slide-out nav) ─────────────────────────────────────────────── */
+.drawer-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 149;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.drawer-scrim.open { opacity: 1; pointer-events: auto; }
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 150;
+  width: 280px;
+  max-width: 85vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  transform: translateX(-100%);
+  transition: transform 0.22s ease;
+}
+.drawer.open { transform: translateX(0); }
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-close {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.drawer-close:hover { color: var(--text); }
+
+.drawer-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 0.75rem 0;
+  overflow-y: auto;
+}
+.drawer-link {
+  border: 0;
+  border-left: 3px solid transparent;
   background: transparent;
   text-decoration: none;
   color: var(--text-dim);
   font-family: var(--font-display);
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  padding: 0 1.1rem;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  border-radius: 0;
-  transition: color 0.15s, border-color 0.15s;
+  padding: 0.8rem 1.1rem;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
   white-space: nowrap;
 }
-.nav-link:hover { color: var(--text); border-bottom-color: rgba(232, 87, 26, 0.35); }
-.nav-link.active { color: var(--text); border-bottom-color: var(--accent); }
+.drawer-link:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.drawer-link.active { color: var(--text); border-left-color: var(--accent); }
+
+.drawer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  border-top: 1px solid var(--line);
+}
 
 .topbar-right {
   display: flex;
@@ -1159,23 +1248,6 @@ button { font-family: inherit; cursor: pointer; }
   .device-select { max-width: 140px; font-size: 0.68rem; }
 }
 
-/* ─── Discover trigger (topbar) ──────────────────────────────────────────── */
-.discover-trigger {
-  border: 1px solid var(--accent);
-  background: transparent;
-  color: var(--accent);
-  font-family: var(--font-display);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 0.35rem 1rem;
-  border-radius: 0;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-.discover-trigger:hover { background: var(--accent); color: #fff; }
-
 /* ─── Discover view ──────────────────────────────────────────────────────── */
 .discover-view {
   position: fixed;
@@ -1442,7 +1514,6 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 720px) {
   :root { --pad-x: 24px; --tile-w: 124px; --tile-w-wide: 220px; }
   .topbar { padding: 0 var(--pad-x); }
-  .nav { overflow-x: auto; scrollbar-width: none; }
   .hero { height: 56vh; }
 }
 

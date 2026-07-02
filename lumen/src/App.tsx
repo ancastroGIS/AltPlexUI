@@ -8,7 +8,7 @@ import {
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
+import { Hero, Row, Setup, TopBar, Drawer, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
 import { itemPath, watchPath, browsePath, gridPath } from "./routes";
 import {
   status, setStatus,
@@ -149,11 +149,18 @@ export function App() {
 
   // ── Route components (close over App state) ──────────────────────────────
 
-  // Chrome layout for browsy pages: top bar + the matched child page.
+  // Chrome layout for browsy pages: top bar + drawer + the matched child page.
   function Shell(props: { children?: JSX.Element }) {
+    const [drawerOpen, setDrawerOpen] = createSignal(false);
     return (
       <div class="app">
-        <TopBar sections={sections()} onSignOut={handleSignOut} />
+        <TopBar onMenu={() => setDrawerOpen(true)} />
+        <Drawer
+          open={drawerOpen()}
+          sections={sections()}
+          onClose={() => setDrawerOpen(false)}
+          onSignOut={handleSignOut}
+        />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           {props.children}
         </Suspense>

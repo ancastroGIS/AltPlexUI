@@ -75,42 +75,82 @@ export function fmt(s: number): string {
 // ── TopBar ─────────────────────────────────────────────────────────────────
 
 export function TopBar(props: {
-  sections: Section[];
-  onSignOut: () => void;
+  onMenu: () => void;
 }) {
   const navigate = useNavigate();
   return (
     <header class="topbar">
+      <button class="hamburger" onClick={props.onMenu} aria-label="Open menu">
+        <span /><span /><span />
+      </button>
       <div class="wordmark">
         <span class="mark" aria-hidden="true" />
         Lumen
       </div>
-      <nav class="nav">
-        {/* end => only active on the exact home path, not every route */}
-        <A class="nav-link" activeClass="active" end href="/">
-          Home
-        </A>
-        <For each={props.sections}>
-          {(s) => (
-            <A class="nav-link" activeClass="active" href={sectionPath(s)}>
-              {s.title}
-            </A>
-          )}
-        </For>
-      </nav>
       <div class="topbar-right">
         <Show when={demo()}>
           <span class="badge">Demo</span>
         </Show>
-        <Show when={serverName()}>
-          <span class="server">{serverName()}</span>
-        </Show>
-        <button class="discover-trigger" onClick={() => navigate("/discover")} title="Add media">
-          + Add Media
+        <button class="topbar-search" onClick={() => navigate("/discover")} aria-label="Discover" title="Discover & add media">
+          ⌕
         </button>
-        <button class="sign-out" onClick={props.onSignOut}>Sign out</button>
       </div>
     </header>
+  );
+}
+
+// ── Drawer ─────────────────────────────────────────────────────────────────
+// Slide-out navigation panel (Plex-style). Replaces the top-bar tabs so the
+// same nav pattern works on desktop, TV, and phone.
+
+export function Drawer(props: {
+  open: boolean;
+  sections: Section[];
+  onClose: () => void;
+  onSignOut: () => void;
+}) {
+  // Escape closes the drawer while it's open
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && props.open) props.onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
+  });
+
+  return (
+    <>
+      <div class="drawer-scrim" classList={{ open: props.open }} onClick={props.onClose} />
+      <aside class="drawer" classList={{ open: props.open }} aria-hidden={!props.open}>
+        <div class="drawer-head">
+          <div class="wordmark">
+            <span class="mark" aria-hidden="true" />
+            Lumen
+          </div>
+          <button class="drawer-close" onClick={props.onClose} aria-label="Close menu">✕</button>
+        </div>
+        <nav class="drawer-nav" onClick={props.onClose}>
+          {/* end => only active on the exact home path, not every route */}
+          <A class="drawer-link" activeClass="active" end href="/">Home</A>
+          <For each={props.sections}>
+            {(s) => (
+              <A class="drawer-link" activeClass="active" href={sectionPath(s)}>
+                {s.title}
+              </A>
+            )}
+          </For>
+          <A class="drawer-link" activeClass="active" href="/discover">Discover</A>
+        </nav>
+        <div class="drawer-foot">
+          <Show when={serverName()}>
+            <span class="server">{serverName()}</span>
+          </Show>
+          <button class="sign-out" onClick={() => { props.onClose(); props.onSignOut(); }}>
+            Sign out
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
 
