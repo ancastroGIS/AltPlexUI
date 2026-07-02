@@ -19,6 +19,10 @@ import {
 import {
   checkInstantAvailability, isAvailable, type RdAvailability,
 } from "./rd";
+import {
+  getTrending, getPopular, tmdbPoster, tmdbTitle, tmdbYear,
+  TmdbNotConfiguredError, type TmdbItem,
+} from "./tmdb";
 import { poster, backdrop, progress } from "./media";
 import { serverName, demo } from "./store";
 import { A, useNavigate } from "@solidjs/router";
@@ -935,7 +939,9 @@ export function InfoView(props: {
 export function DiscoverView(props: { onClose: () => void }) {
   const [query, setQuery] = createSignal("");
   const [debouncedQuery, setDebouncedQuery] = createSignal("");
-  const [tab, setTab] = createSignal<"movie" | "show">("movie");
+  // A trending/popular card the user tapped — resolved via arr lookup so the
+  // normal add flow applies. Cleared when the user types a search instead.
+  const [tmdbPick, setTmdbPick] = createSignal<{ id: number; media: "movie" | "tv"; title: string } | null>(null);
   type AddMode = "down" | "sym";
   type AddStatus = "adding" | "added" | "error";
   const [addStates, setAddStates] = createSignal<Record<string, { mode: AddMode; status: AddStatus }>>({});
@@ -945,22 +951,55 @@ export function DiscoverView(props: { onClose: () => void }) {
   const profile = () => PRESETS.find((p) => p.id === profileId()) ?? PRESETS[0];
   createEffect(() => saveDeviceProfile(profileId()));
 
-  // Debounce search input by 400 ms
+  // Debounce search input by 400 ms. Typing a query dismisses a tapped
+  // trending card so the two "modes" never fight over the results area.
   createEffect(() => {
     const q = query();
+    if (q) setTmdbPick(null);
     if (!q) { setDebouncedQuery(""); return; }
     const t = setTimeout(() => setDebouncedQuery(q), 400);
     onCleanup(() => clearTimeout(t));
   });
 
-  // ── Radarr / Sonarr search ─────────────────────────────────────────────
-  const [movieResults] = createResource(
-    () => (tab() === "movie" ? debouncedQuery() : null) || null,
-    searchMovies
-  );
-  const [showResults] = createResource(
-    () => (tab() === "show" ? debouncedQuery() : null) || null,
-    searchSeries
+  // ── Unified Radarr + Sonarr search (both run on every query) ───────────
+  const [movieResults] = createResource(() => debouncedQuery() || null, searchMovies);
+  const [showResults] = createResource(() => debouncedQuery() || null, searchSeries);
+
+  // Interleave the two relevance-sorted lists so top matches from each
+  // service surface together in one grid.
+  type MergedResult = { item: ArrMovie | ArrSeries; type: "movie" | "show" };
+  const mergedResults = (): MergedResult[] => {
+    const movies = movieResults() ?? [];
+    const shows = showResults() ?? [];
+    const out: MergedResult[] = [];
+    const n = Math.max(movies.length, shows.length);
+    for (let i = 0; i < n; i++) {
+      if (movies[i]) out.push({ item: movies[i], type: "movie" });
+      if (shows[i]) out.push({ item: shows[i], type: "show" });
+    }
+    return out;
+  };
+
+  // ── Trending / popular rows (empty-query state) ────────────────────────
+  const [trendingMovies] = createResource(() => getTrending("movie"));
+  const [trendingTv] = createResource(() => getTrending("tv"));
+  const [popularMovies] = createResource(() => getPopular("movie"));
+  const [popularTv] = createResource(() => getPopular("tv"));
+  const tmdbConfigured = () =>
+    !(trendingMovies.error instanceof TmdbNotConfiguredError);
+
+  // Resolve a tapped trending card through the matching arr lookup so it
+  // gets the exact same CardAction add flow as a search result.
+  const [pickedResult] = createResource(
+    tmdbPick,
+    async (pick): Promise<MergedResult | null> => {
+      if (pick.media === "movie") {
+        const r = await searchMovies(`tmdb:${pick.id}`);
+        return r[0] ? { item: r[0], type: "movie" } : null;
+      }
+      const r = await searchSeries(`tmdb:${pick.id}`);
+      return r[0] ? { item: r[0], type: "show" } : null;
+    }
   );
 
   // Fetch arr config once on mount so the first "Add" click is instant
@@ -974,11 +1013,11 @@ export function DiscoverView(props: { onClose: () => void }) {
   );
 
   // ── Prowlarr release search (parallel to Radarr/Sonarr) ───────────────
+  // Unified search spans movies (2000) and TV (5000) in one query.
   const [prowlarrReleases] = createResource(
     (): { q: string; categories: number[] } | null => {
       const q = debouncedQuery();
-      const t = tab();
-      return q ? { q, categories: t === "movie" ? [2000] : [5000] } : null;
+      return q ? { q, categories: [2000, 5000] } : null;
     },
     ({ q, categories }) =>
       searchProwlarr(q, categories).catch((): ProwlarrRelease[] => [])
@@ -1133,64 +1172,74 @@ export function DiscoverView(props: { onClose: () => void }) {
     );
   }
 
-  function ResultGrid<T extends ArrMovie | ArrSeries>(gProps: {
-    items: T[] | undefined;
-    type: "movie" | "show";
-    error: unknown;
-    loading: boolean;
-    service: string;
-  }) {
+  // One card in the unified results grid — carries a MOVIE/TV type badge so
+  // merged results stay distinguishable.
+  function ResultCard(cProps: { item: ArrMovie | ArrSeries; type: "movie" | "show" }) {
+    const item = cProps.item;
+    const posterUrl = arrPoster(item.images);
+    const subtitle =
+      cProps.type === "show"
+        ? `${item.year}${(item as ArrSeries).status === "continuing" ? "  ·  Ongoing" : ""}`
+        : String(item.year || "");
+    const compat = () => getBestCompat(item.title, item.year);
     return (
-      <>
-        <Show when={gProps.loading}>
-          <div class="loading">Searching…</div>
-        </Show>
-        <Show when={gProps.error && !gProps.loading}>
-          <div class="discover-msg">
-            {gProps.service} unavailable — add API key to .env and restart Lumen.
-          </div>
-        </Show>
-        <Show when={gProps.items && !gProps.loading}>
-          <Show when={gProps.items!.length === 0}>
-            <div class="discover-msg">No results found.</div>
+      <div class="discover-card">
+        <div class="discover-poster">
+          <Show
+            when={posterUrl}
+            fallback={<div class="discover-poster-ph">{item.title[0]}</div>}
+          >
+            <img src={posterUrl} alt={item.title} loading="lazy" />
           </Show>
-          <div class="discover-grid">
-            <For each={gProps.items}>
-              {(item) => {
-                const posterUrl = arrPoster(item.images);
-                const subtitle =
-                  gProps.type === "show"
-                    ? `${item.year}${(item as ArrSeries).status === "continuing" ? "  ·  Ongoing" : ""}`
-                    : String(item.year || "");
-                const compat = () => getBestCompat(item.title, item.year);
-                return (
-                  <div class="discover-card">
-                    <div class="discover-poster">
-                      <Show
-                        when={posterUrl}
-                        fallback={<div class="discover-poster-ph">{item.title[0]}</div>}
-                      >
-                        <img src={posterUrl} alt={item.title} loading="lazy" />
-                      </Show>
-                      {/* RD streaming compatibility badge — top-right corner */}
-                      <Show when={compat()} keyed>
-                        {(c) => <StreamCompatBadge compat={c} />}
-                      </Show>
-                      <div class="discover-card-action">
-                        <CardAction item={item} type={gProps.type} />
-                      </div>
-                    </div>
-                    <div class="discover-card-meta">
-                      <p class="discover-card-title">{item.title}</p>
-                      <p class="discover-card-year">{subtitle}</p>
-                    </div>
+          <span class={`disc-type-badge disc-type-badge--${cProps.type}`}>
+            {cProps.type === "movie" ? "MOVIE" : "TV"}
+          </span>
+          {/* RD streaming compatibility badge — top-right corner */}
+          <Show when={compat()} keyed>
+            {(c) => <StreamCompatBadge compat={c} />}
+          </Show>
+          <div class="discover-card-action">
+            <CardAction item={item} type={cProps.type} />
+          </div>
+        </div>
+        <div class="discover-card-meta">
+          <p class="discover-card-title">{item.title}</p>
+          <p class="discover-card-year">{subtitle}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Horizontal strip of TMDB trending/popular posters (empty-query state).
+  // Tapping a card resolves it through the arr lookup into the add flow.
+  function TrendRow(tProps: { title: string; items: TmdbItem[] | undefined; media: "movie" | "tv" }) {
+    return (
+      <Show when={tProps.items?.length}>
+        <section class="disc-row">
+          <h2 class="row-title">{tProps.title}</h2>
+          <div class="disc-row-scroll">
+            <For each={tProps.items}>
+              {(it) => (
+                <button
+                  class="disc-trend-card"
+                  onClick={() => setTmdbPick({ id: it.id, media: tProps.media, title: tmdbTitle(it) })}
+                >
+                  <div class="disc-trend-poster">
+                    <Show
+                      when={it.poster_path}
+                      fallback={<div class="discover-poster-ph">{tmdbTitle(it)[0] ?? "?"}</div>}
+                    >
+                      <img src={tmdbPoster(it.poster_path)} alt={tmdbTitle(it)} loading="lazy" />
+                    </Show>
                   </div>
-                );
-              }}
+                  <p class="discover-card-title">{tmdbTitle(it)}</p>
+                  <p class="discover-card-year">{tmdbYear(it)}</p>
+                </button>
+              )}
             </For>
           </div>
-        </Show>
-      </>
+        </section>
+      </Show>
     );
   }
 
@@ -1201,27 +1250,11 @@ export function DiscoverView(props: { onClose: () => void }) {
         <input
           class="discover-input"
           type="search"
-          placeholder="Search movies and shows…"
+          placeholder="Search movies & TV…"
           value={query()}
           onInput={(e) => setQuery(e.currentTarget.value)}
           autofocus
         />
-        <div class="discover-tabs">
-          <button
-            class="discover-tab"
-            classList={{ active: tab() === "movie" }}
-            onClick={() => setTab("movie")}
-          >
-            Movies
-          </button>
-          <button
-            class="discover-tab"
-            classList={{ active: tab() === "show" }}
-            onClick={() => setTab("show")}
-          >
-            Shows
-          </button>
-        </div>
         {/* Device profile selector — controls stream-compat scoring */}
         <select
           class="device-select"
@@ -1237,31 +1270,66 @@ export function DiscoverView(props: { onClose: () => void }) {
       </div>
 
       <div class="discover-body">
-        <Show when={!debouncedQuery()}>
-          <div class="discover-msg discover-msg--empty">
-            <p>Search for content to add to your library.</p>
-            <p>Results come from Radarr (movies) and Sonarr (shows) via TMDB / TVDB.</p>
+        {/* ── Tapped trending card: single resolved result ── */}
+        <Show when={tmdbPick()}>
+          <div class="disc-pick-bar">
+            <button class="btn btn-ghost" onClick={() => setTmdbPick(null)}>← Back to trending</button>
           </div>
+          <Show when={pickedResult.loading}>
+            <div class="loading">Looking up {tmdbPick()!.title}…</div>
+          </Show>
+          <Show when={pickedResult() === null && !pickedResult.loading}>
+            <div class="discover-msg">Couldn't match "{tmdbPick()!.title}" — try searching for it instead.</div>
+          </Show>
+          <Show when={pickedResult()} keyed>
+            {(r) => (
+              <div class="discover-grid">
+                <ResultCard item={r.item} type={r.type} />
+              </div>
+            )}
+          </Show>
         </Show>
 
-        <Show when={tab() === "movie" && !!debouncedQuery()}>
-          <ResultGrid
-            items={movieResults()}
-            type="movie"
-            error={movieResults.error}
-            loading={movieResults.loading}
-            service="Radarr"
-          />
+        {/* ── Unified search results ── */}
+        <Show when={!!debouncedQuery()}>
+          <Show when={movieResults.loading || showResults.loading}>
+            <div class="loading">Searching…</div>
+          </Show>
+          <Show when={movieResults.error && showResults.error && !movieResults.loading && !showResults.loading}>
+            <div class="discover-msg">
+              Radarr and Sonarr unavailable — add API keys to .env and restart Lumen.
+            </div>
+          </Show>
+          <Show when={!movieResults.loading && !showResults.loading && !(movieResults.error && showResults.error)}>
+            <Show when={mergedResults().length === 0}>
+              <div class="discover-msg">No results found.</div>
+            </Show>
+            <div class="discover-grid">
+              <For each={mergedResults()}>
+                {(r) => <ResultCard item={r.item} type={r.type} />}
+              </For>
+            </div>
+          </Show>
         </Show>
 
-        <Show when={tab() === "show" && !!debouncedQuery()}>
-          <ResultGrid
-            items={showResults()}
-            type="show"
-            error={showResults.error}
-            loading={showResults.loading}
-            service="Sonarr"
-          />
+        {/* ── Empty query: trending/popular rows ── */}
+        <Show when={!debouncedQuery() && !tmdbPick()}>
+          <Show
+            when={tmdbConfigured()}
+            fallback={
+              <div class="discover-msg discover-msg--empty">
+                <p>Search for movies & TV to add to your library.</p>
+                <p>Tip: add a TMDB_API_KEY to .env to see trending picks here.</p>
+              </div>
+            }
+          >
+            <div class="disc-rows">
+              <TrendRow title="Trending Movies" items={trendingMovies()} media="movie" />
+              <TrendRow title="Trending TV" items={trendingTv()} media="tv" />
+              <TrendRow title="Popular Movies" items={popularMovies()} media="movie" />
+              <TrendRow title="Popular TV" items={popularTv()} media="tv" />
+            </div>
+          </Show>
         </Show>
       </div>
     </div>

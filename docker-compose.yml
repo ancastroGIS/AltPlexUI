@@ -35,6 +35,7 @@ services:
       - LIDARR_API_KEY=${LIDARR_API_KEY:-}
       - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
       - REAL_DEBRID_API_KEY=${RD_API_KEY:-}
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
     depends_on:
       - radarr
       - sonarr
