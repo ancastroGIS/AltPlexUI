@@ -4,7 +4,7 @@ import Hls from "hls.js";
 import {
   buildHlsUrl, newSessionId, pingTranscodeSession, stopTranscodeSession, reportProgress,
   getAllItems, getChildren, getDetails, img,
-  type Hub, type Item, type Section,
+  type Hub, type Item, type Section, type HomeUser,
 } from "./plex";
 import {
   searchMovies, searchSeries, addMovie, addSeries, arrPoster,
@@ -108,6 +108,9 @@ export function Drawer(props: {
   sections: Section[];
   onClose: () => void;
   onSignOut: () => void;
+  // Plex Home: current profile + switcher (hidden for single-user accounts)
+  profile?: { title: string; thumb?: string } | null;
+  onSwitchProfile?: () => void;
 }) {
   // Escape closes the drawer while it's open
   onMount(() => {
@@ -129,6 +132,22 @@ export function Drawer(props: {
           </div>
           <button class="drawer-close" onClick={props.onClose} aria-label="Close menu">✕</button>
         </div>
+        <Show when={props.profile && props.onSwitchProfile}>
+          <button
+            class="drawer-profile"
+            onClick={() => { props.onClose(); props.onSwitchProfile!(); }}
+            title="Switch profile"
+          >
+            <Show
+              when={props.profile!.thumb}
+              fallback={<span class="profile-avatar profile-avatar--ph profile-avatar--sm">{props.profile!.title[0] ?? "?"}</span>}
+            >
+              <img class="profile-avatar profile-avatar--sm" src={props.profile!.thumb} alt="" />
+            </Show>
+            <span class="drawer-profile-name">{props.profile!.title}</span>
+            <span class="drawer-profile-hint">Switch ▸</span>
+          </button>
+        </Show>
         <nav class="drawer-nav" onClick={props.onClose}>
           {/* end => only active on the exact home path, not every route */}
           <A class="drawer-link" activeClass="active" end href="/">Home</A>
@@ -151,6 +170,104 @@ export function Drawer(props: {
         </div>
       </aside>
     </>
+  );
+}
+
+// ── ProfileGate ────────────────────────────────────────────────────────────
+// "Who's watching?" — Plex Home profile picker. Protected profiles prompt
+// for their PIN inline. The parent owns the actual token switch.
+
+export function ProfileGate(props: {
+  users: HomeUser[];
+  onSelect: (user: HomeUser, pin?: string) => Promise<void>;
+}) {
+  const [pinFor, setPinFor] = createSignal<HomeUser | null>(null);
+  const [pin, setPin] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal("");
+
+  async function choose(user: HomeUser, pinValue?: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await props.onSelect(user, pinValue);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Couldn't switch profile.");
+      setBusy(false);
+    }
+  }
+
+  function onCardClick(user: HomeUser) {
+    if (user.protected) {
+      setPinFor(user);
+      setPin("");
+      setError("");
+    } else {
+      choose(user);
+    }
+  }
+
+  return (
+    <div class="profile-gate">
+      <Show
+        when={!pinFor()}
+        fallback={
+          <div class="profile-pin">
+            <ProfileAvatar user={pinFor()!} />
+            <p class="profile-pin-name">{pinFor()!.title}</p>
+            <input
+              class="field profile-pin-input"
+              type="password"
+              inputmode="numeric"
+              placeholder="PIN"
+              maxlength="4"
+              value={pin()}
+              onInput={(e) => setPin(e.currentTarget.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && pin()) choose(pinFor()!, pin()); }}
+              autofocus
+            />
+            <Show when={error()}>
+              <p class="field-error">{error()}</p>
+            </Show>
+            <div class="profile-pin-actions">
+              <button class="btn btn-primary" disabled={!pin() || busy()} onClick={() => choose(pinFor()!, pin())}>
+                {busy() ? "Switching…" : "Continue"}
+              </button>
+              <button class="btn btn-ghost" onClick={() => setPinFor(null)}>Back</button>
+            </div>
+          </div>
+        }
+      >
+        <h1 class="profile-gate-title">Who's watching?</h1>
+        <Show when={error()}>
+          <p class="field-error">{error()}</p>
+        </Show>
+        <div class="profile-grid">
+          <For each={props.users}>
+            {(user) => (
+              <button class="profile-card" disabled={busy()} onClick={() => onCardClick(user)}>
+                <ProfileAvatar user={user} />
+                <span class="profile-name">
+                  {user.title}
+                  <Show when={user.protected}> 🔒</Show>
+                </span>
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+function ProfileAvatar(props: { user: HomeUser }) {
+  return (
+    <Show
+      when={props.user.thumb}
+      fallback={<div class="profile-avatar profile-avatar--ph">{props.user.title[0] ?? "?"}</div>}
+    >
+      <img class="profile-avatar" src={props.user.thumb} alt={props.user.title} />
+    </Show>
   );
 }
 

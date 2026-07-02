@@ -3,12 +3,13 @@ import { For, Show, Suspense, createResource, createSignal, onCleanup, onMount, 
 import { Router, Route, useNavigate, useParams, useLocation, A } from "@solidjs/router";
 import {
   getIdentity, getSections, getHubs, getDetails, getToken, setToken, clearToken,
+  setAdminToken, getHomeUsers, switchHomeUser, getActiveProfile, setActiveProfile,
   createPin, checkPin, plexAuthUrl, PlexError,
-  type Hub, type Item, type Section,
+  type Hub, type Item, type Section, type HomeUser,
 } from "./plex";
 import { mockHubs, mockHero } from "./mock";
 import { initSpatialNav } from "./nav";
-import { Hero, Row, Setup, TopBar, Drawer, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
+import { Hero, Row, Setup, TopBar, Drawer, ProfileGate, Player, LibraryGrid, DetailView, InfoView, DiscoverView } from "./components";
 import { itemPath, watchPath, browsePath, gridPath } from "./routes";
 import {
   status, setStatus,
@@ -31,6 +32,9 @@ function pickHero(hubs: Hub[]): Item | undefined {
 
 export function App() {
   const [sections, setSections] = createSignal<Section[]>([]);
+  // Plex Home: users on the account, and whether the who's-watching gate shows
+  const [homeUsers, setHomeUsers] = createSignal<HomeUser[]>([]);
+  const [showGate, setShowGate] = createSignal(false);
   let stopPoll: (() => void) | undefined;
 
   onMount(() => {
@@ -50,10 +54,27 @@ export function App() {
       setServerName(name);
       setDemo(false);
       setStatus("ready");
+      // Plex Home: load profiles (non-fatal). Gate on startup when the
+      // account has multiple users and none has been picked yet.
+      getHomeUsers().then((users) => {
+        setHomeUsers(users);
+        if (users.length > 1 && !getActiveProfile()) setShowGate(true);
+      }).catch(() => setHomeUsers([]));
     } catch {
       setErrorMsg("Couldn't reach your server. Check the address and token, then try again.");
       setStatus("error");
     }
+  }
+
+  // Switch to a Home user: their token becomes the active token, then we
+  // reconnect so libraries/hubs reload under the new profile's permissions.
+  // The gate stays up until the reconnect finishes so no half-loaded UI shows.
+  async function handleSelectProfile(user: HomeUser, pin?: string) {
+    const token = await switchHomeUser(user.uuid, pin);
+    setToken(token);
+    setActiveProfile({ uuid: user.uuid, title: user.title, thumb: user.thumb });
+    await connect();
+    setShowGate(false);
   }
 
   async function startPinFlow() {
@@ -89,6 +110,7 @@ export function App() {
         const token = await checkPin(pinId);
         if (token) {
           setToken(token);
+          setAdminToken(token); // account-owner token, kept for profile switching
           setPinData(null);
           await connect();
           return;
@@ -112,7 +134,9 @@ export function App() {
   function handleSignOut() {
     stopPoll?.();
     stopPoll = undefined;
-    clearToken();
+    clearToken(); // clears active + admin tokens and the saved profile
+    setHomeUsers([]);
+    setShowGate(false);
     setSections([]);
     setServerName("");
     setErrorMsg("");
@@ -160,6 +184,8 @@ export function App() {
           sections={sections()}
           onClose={() => setDrawerOpen(false)}
           onSignOut={handleSignOut}
+          profile={homeUsers().length > 1 ? getActiveProfile() : null}
+          onSwitchProfile={() => setShowGate(true)}
         />
         <Suspense fallback={<div class="loading">Loading your library…</div>}>
           {props.children}
@@ -367,11 +393,17 @@ export function App() {
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
+    <>
+      {/* Plex Home gate — overlays everything (z-300) until a profile is
+          picked; stays mounted through the reconnect so nothing flashes. */}
+      <Show when={showGate()}>
+        <ProfileGate users={homeUsers()} onSelect={handleSelectProfile} />
+      </Show>
     <Show
       when={status() === "ready"}
       fallback={
         <Setup
-          onConnect={(t) => { setToken(t); connect(); }}
+          onConnect={(t) => { setToken(t); setAdminToken(t); connect(); }}
           onStartPin={startPinFlow}
           onCancelPin={cancelPin}
           onDemo={startDemo}
@@ -395,5 +427,6 @@ export function App() {
         <Route path="/discover" component={DiscoverRoute} />
       </Router>
     </Show>
+    </>
   );
 }

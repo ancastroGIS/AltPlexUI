@@ -2,16 +2,45 @@
 const BASE = "/plex";
 const PLEX_TV = "/plextv";
 const LS_TOKEN = "lumen_token";
+const LS_ADMIN_TOKEN = "lumen_admin_token";
+const LS_PROFILE = "lumen_profile";
 const LS_CLIENT_ID = "lumen_client_id";
 
+// Active token — what every PMS call uses. After a profile switch this is
+// the Home user's token, so watch state / Continue Watching are per-profile.
 export function getToken() {
   return localStorage.getItem(LS_TOKEN) || "";
 }
 export function setToken(t: string) {
   localStorage.setItem(LS_TOKEN, t.trim());
 }
+// Admin (account owner) token — kept separately so profile switching and
+// switching back never require re-authentication.
+export function getAdminToken() {
+  return localStorage.getItem(LS_ADMIN_TOKEN) || getToken();
+}
+export function setAdminToken(t: string) {
+  localStorage.setItem(LS_ADMIN_TOKEN, t.trim());
+}
 export function clearToken() {
   localStorage.removeItem(LS_TOKEN);
+  localStorage.removeItem(LS_ADMIN_TOKEN);
+  localStorage.removeItem(LS_PROFILE);
+}
+
+// ── Active profile (Plex Home user) ────────────────────────────────────────
+
+export interface ActiveProfile { uuid: string; title: string; thumb?: string }
+
+export function getActiveProfile(): ActiveProfile | null {
+  try {
+    const raw = localStorage.getItem(LS_PROFILE);
+    return raw ? JSON.parse(raw) as ActiveProfile : null;
+  } catch { return null; }
+}
+export function setActiveProfile(p: ActiveProfile | null) {
+  if (p) localStorage.setItem(LS_PROFILE, JSON.stringify(p));
+  else localStorage.removeItem(LS_PROFILE);
 }
 
 function uuid(): string {
@@ -96,6 +125,46 @@ export function plexAuthUrl(code: string): string {
     "context[device][platform]": "Web",
   });
   return `https://app.plex.tv/auth#?${params.toString()}`;
+}
+
+// ── Plex Home (user profiles) ──────────────────────────────────────────────
+// Home users each get their own token, so switching profiles switches watch
+// state, Continue Watching, and content restrictions automatically. All Home
+// calls use the ADMIN token — a managed user's token can't manage Home.
+
+export interface HomeUser {
+  id: number;
+  uuid: string;
+  title: string;
+  thumb?: string;
+  protected: boolean;   // true => PIN required to switch
+  admin: boolean;
+}
+
+export async function getHomeUsers(): Promise<HomeUser[]> {
+  const res = await fetch(`${PLEX_TV}/api/v2/home/users`, {
+    headers: { ...PLEX_HEADERS(), "X-Plex-Token": getAdminToken() },
+  });
+  // 400/404 => account has no Plex Home; treat as "just me".
+  if (!res.ok) return [];
+  const data = await res.json() as { users?: HomeUser[] };
+  return data.users ?? [];
+}
+
+// Returns the switched-to user's auth token. Throws PlexError on a wrong PIN.
+export async function switchHomeUser(uuid: string, pin?: string): Promise<string> {
+  const params = new URLSearchParams();
+  if (pin) params.set("pin", pin);
+  const res = await fetch(`${PLEX_TV}/api/v2/home/users/${uuid}/switch?${params}`, {
+    method: "POST",
+    headers: { ...PLEX_HEADERS(), "X-Plex-Token": getAdminToken() },
+  });
+  if (!res.ok) {
+    throw new PlexError(res.status === 401 ? "Wrong PIN" : `Profile switch failed (${res.status})`, res.status);
+  }
+  const data = await res.json() as { authToken?: string };
+  if (!data.authToken) throw new PlexError("Profile switch returned no token", 500);
+  return data.authToken;
 }
 
 export interface MediaStream {

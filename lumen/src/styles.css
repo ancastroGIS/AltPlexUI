@@ -211,6 +211,134 @@ button { font-family: inherit; cursor: pointer; }
   border-top: 1px solid var(--line);
 }
 
+/* Drawer profile entry (Plex Home) */
+.drawer-profile {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+}
+.drawer-profile:hover { background: rgba(255, 255, 255, 0.04); }
+.drawer-profile-name {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+.drawer-profile-hint {
+  font-family: var(--font-display);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* ── ProfileGate ("Who's watching?") ────────────────────────────────────── */
+.profile-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2rem;
+  padding: 2rem;
+}
+.profile-gate-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3.5vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0;
+}
+.profile-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2rem;
+}
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.5rem;
+}
+.profile-avatar {
+  width: 108px;
+  height: 108px;
+  border-radius: 0;
+  object-fit: cover;
+  border: 2px solid var(--line);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.profile-card:hover .profile-avatar,
+.profile-card:focus-visible .profile-avatar {
+  border-color: var(--accent);
+  transform: scale(1.04);
+}
+.profile-avatar--ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--surface-2);
+}
+.profile-avatar--sm {
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
+}
+.profile-name {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+/* PIN entry step */
+.profile-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.profile-pin-name {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+}
+.profile-pin-input {
+  width: 120px;
+  text-align: center;
+  font-size: 1.4rem;
+  letter-spacing: 0.5em;
+}
+.profile-pin-actions { display: flex; gap: 0.8rem; }
+
 .topbar-right {
   display: flex;
   align-items: center;
